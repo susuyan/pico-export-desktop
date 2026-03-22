@@ -1,0 +1,330 @@
+use crate::config::{AuthInfo, DownloadConfig, DownloadTask};
+use crate::scheduler::{Batch, TaskScheduler};
+use crate::checkpoint::{CheckpointData, CheckpointManager};
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tokio::process::Command;
+use tokio::sync::mpsc;
+use tokio::time::{sleep, Duration};
+
+/// 文件下载状态
+#[derive(Debug, Clone)]
+pub enum FileStatus {
+    Pending,
+    Downloading,
+    Completed,
+    Failed(String),
+}
+
+/// 文件进度
+#[derive(Debug, Clone)]
+pub struct FileProgress {
+    pub task_id: String,
+    pub filename: String,
+    pub status: FileStatus,
+    pub progress: f64,
+    pub speed: Option<u64>,
+}
+
+/// 批次信息
+#[derive(Debug, Clone)]
+pub struct BatchInfo {
+    pub batch_index: usize,
+    pub total_batches: usize,
+    pub files_in_batch: usize,
+    pub completed_files: usize,
+}
+
+/// 下载进度
+#[derive(Debug, Clone)]
+pub struct DownloadProgress {
+    pub total_files: usize,
+    pub completed_files: usize,
+    pub failed_files: usize,
+    pub total_size: u64,
+    pub downloaded_size: u64,
+    pub current_batch: BatchInfo,
+    pub file_progress: Vec<FileProgress>,
+    pub overall_progress: f64,
+    pub speed: u64,
+    pub remaining_time: u64,
+    pub status: String,
+}
+
+/// 下载结果
+#[derive(Debug)]
+pub struct DownloadResult {
+    pub success_count: usize,
+    pub failed_count: usize,
+    pub failed_tasks: Vec<String>,
+}
+
+/// 下载管理器
+pub struct DownloadManager {
+    config: DownloadConfig,
+    scheduler: TaskScheduler,
+    checkpoint_manager: CheckpointManager,
+    checkpoint: CheckpointData,
+    download_dir: PathBuf,
+    running: Arc<AtomicBool>,
+    progress_tx: Option<mpsc::Sender<DownloadProgress>>,
+}
+
+impl DownloadManager {
+    /// 创建新的下载管理器
+    pub fn new(
+        config: DownloadConfig,
+        download_dir: PathBuf,
+        checkpoint_manager: CheckpointManager,
+    ) -> anyhow::Result<Self> {
+        let scheduler = TaskScheduler::from_config(&config);
+
+        // 尝试加载已有检查点，否则创建新的
+        let checkpoint = checkpoint_manager
+            .load(&config.export_id)?
+            .unwrap_or_else(|| CheckpointData::new(config.export_id.clone(), config.clone()));
+
+        Ok(Self {
+            config,
+            scheduler,
+            checkpoint_manager,
+            checkpoint,
+            download_dir,
+            running: Arc::new(AtomicBool::new(false)),
+            progress_tx: None,
+        })
+    }
+
+    /// 设置进度发送器
+    pub fn set_progress_sender(&mut self, tx: mpsc::Sender<DownloadProgress>) {
+        self.progress_tx = Some(tx);
+    }
+
+    /// 开始下载
+    pub async fn start(&mut self) -> anyhow::Result<DownloadResult> {
+        self.running.store(true, Ordering::SeqCst);
+
+        // 获取待下载的任务
+        let pending_tasks = self.checkpoint.get_pending_tasks();
+        let batches = self.scheduler.create_batches(&pending_tasks);
+        let total_batches = batches.len();
+
+        let mut success_count = self.checkpoint.completed_tasks.len();
+        let mut failed_count = self.checkpoint.failed_tasks.len();
+
+        for (idx, batch) in batches.iter().enumerate() {
+            if !self.running.load(Ordering::SeqCst) {
+                break;
+            }
+
+            // 更新当前批次索引
+            self.checkpoint.set_batch_index(idx);
+            self.checkpoint_manager.save(&self.checkpoint)?;
+
+            // 执行批次下载
+            match self.download_batch(batch, idx, total_batches).await {
+                Ok(results) => {
+                    for (task_id, success, error) in results {
+                        if success {
+                            self.checkpoint.add_completed(task_id);
+                            success_count += 1;
+                        } else {
+                            self.checkpoint.add_failed(task_id.clone());
+                            failed_count += 1;
+                            tracing::error!("Download failed for {}: {}", task_id, error.unwrap_or_default());
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Batch {} download error: {}", idx, e);
+                }
+            }
+
+            // 批次间停顿
+            if idx < total_batches - 1 {
+                let interval = self.scheduler.batch_interval_ms();
+                if interval > 0 {
+                    sleep(Duration::from_millis(interval)).await;
+                }
+            }
+
+            // 保存进度
+            self.checkpoint_manager.save(&self.checkpoint)?;
+        }
+
+        self.running.store(false, Ordering::SeqCst);
+
+        // 如果全部完成，删除检查点
+        if success_count >= self.config.tasks.len() {
+            self.checkpoint_manager.delete(&self.config.export_id)?;
+        }
+
+        Ok(DownloadResult {
+            success_count,
+            failed_count,
+            failed_tasks: self.checkpoint.failed_tasks.clone(),
+        })
+    }
+
+    /// 下载单个批次
+    async fn download_batch(
+        &self,
+        batch: &Batch,
+        batch_index: usize,
+        total_batches: usize,
+    ) -> anyhow::Result<Vec<(String, bool, Option<String>)>> {
+        let concurrent = self.scheduler.concurrent();
+        let mut results = Vec::new();
+
+        // 使用信号量限制并发数
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrent));
+        let mut handles = Vec::new();
+
+        for task in &batch.tasks {
+            let permit = semaphore.clone().acquire_owned().await?;
+            let task = task.clone();
+            let download_dir = self.download_dir.clone();
+            let auth = self.config.auth.clone();
+            let endpoint = self.config.endpoint.clone();
+            let bucket = self.config.bucket.clone();
+            let running = self.running.clone();
+
+            let handle = tokio::spawn(async move {
+                let _permit = permit; // 持有信号量许可直到任务完成
+
+                if !running.load(Ordering::SeqCst) {
+                    return (task.id.clone(), false, Some("Cancelled".to_string()));
+                }
+
+                match download_file(&task, &download_dir, &auth, &endpoint, &bucket).await {
+                    Ok(_) => (task.id.clone(), true, None),
+                    Err(e) => (task.id.clone(), false, Some(e.to_string())),
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        // 等待所有任务完成
+        for handle in handles {
+            match handle.await {
+                Ok(result) => results.push(result),
+                Err(e) => {
+                    tracing::error!("Task join error: {}", e);
+                    results.push(("unknown".to_string(), false, Some(e.to_string())));
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// 暂停下载
+    pub fn pause(&self) {
+        self.running.store(false, Ordering::SeqCst);
+    }
+
+    /// 是否正在运行
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+}
+
+/// 下载单个文件
+async fn download_file(
+    task: &DownloadTask,
+    download_dir: &PathBuf,
+    auth: &AuthInfo,
+    endpoint: &str,
+    bucket: &str,
+) -> anyhow::Result<()> {
+    // 构建目标路径
+    let target_path = download_dir.join(&task.target);
+
+    // 创建父目录
+    if let Some(parent) = target_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
+    // 构建 obsutil 命令
+    // 提取 object key 从 source (obs://bucket/key)
+    let object_key = task.source.trim_start_matches(&format!("obs://{}/", bucket));
+    let source_url = format!("obs://{}/{}", bucket, object_key);
+
+    // 构建命令
+    let output = Command::new("obsutil")
+        .args(&[
+            "cp",
+            "-f",
+            "-u",
+            &format!("-i={}", auth.ak),
+            &format!("-k={}", auth.sk),
+            &format!("-e={}", endpoint),
+            &source_url,
+            target_path.to_str().unwrap(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await;
+
+    match output {
+        Ok(output) => {
+            if output.status.success() {
+                Ok(())
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                Err(anyhow::anyhow!("obsutil failed: {}", stderr))
+            }
+        }
+        Err(e) => {
+            // obsutil 可能不存在，尝试使用替代方案
+            tracing::warn!("obsutil not found or failed: {}, trying alternative", e);
+            download_file_with_curl(task, download_dir, auth, endpoint, bucket).await
+        }
+    }
+}
+
+/// 使用 curl 作为备选下载方案
+async fn download_file_with_curl(
+    task: &DownloadTask,
+    download_dir: &PathBuf,
+    auth: &AuthInfo,
+    endpoint: &str,
+    _bucket: &str,
+) -> anyhow::Result<()> {
+    // 构建目标路径
+    let target_path = download_dir.join(&task.target);
+
+    // 创建父目录
+    if let Some(parent) = target_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
+    // 构建 URL
+    let url = format!("https://{}/{}", endpoint, task.source.trim_start_matches("obs://"));
+
+    // 使用 curl 下载
+    let output = Command::new("curl")
+        .args(&[
+            "-L",
+            "-o",
+            target_path.to_str().unwrap(),
+            "-H",
+            &format!("Authorization: Bearer {}", auth.token),
+            &url,
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(anyhow::anyhow!("curl download failed: {}", stderr))
+    }
+}
