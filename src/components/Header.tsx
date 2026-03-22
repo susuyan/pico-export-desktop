@@ -3,9 +3,10 @@ import { Download, History, Settings, HelpCircle } from 'lucide-react'
 interface HeaderProps {
   activeView: string
   onNavigate: (view: 'import' | 'preview' | 'downloading' | 'complete') => void
+  onOpenSettings?: () => void
 }
 
-export function Header({ activeView, onNavigate }: HeaderProps) {
+export function Header({ activeView, onNavigate, onOpenSettings }: HeaderProps) {
   return (
     <header className="bg-white border-b border-gray-200 px-6 py-4">
       <div className="flex items-center justify-between">
@@ -37,6 +38,7 @@ export function Header({ activeView, onNavigate }: HeaderProps) {
             历史记录
           </button>
           <button
+            onClick={onOpenSettings}
             className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors flex items-center gap-2"
           >
             <Settings className="w-4 h-4" />

@@ -53,6 +53,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": ["Resources/**/*"],
     "macOS": {
       "entitlements": null,
       "exceptionDomain": "",

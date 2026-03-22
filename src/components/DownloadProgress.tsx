@@ -9,7 +9,14 @@ interface DownloadProgressProps {
 }
 
 export function DownloadProgress({ progress, status, onPauseResume, onCancel }: DownloadProgressProps) {
-  if (!progress) return null
+  if (!progress) {
+    return (
+      <div className="max-w-4xl mx-auto flex flex-col items-center justify-center h-96">
+        <div className="w-16 h-16 border-4 border-primary-500 border-t-transparent rounded-full animate-spin mb-4" />
+        <p className="text-gray-600">正在初始化下载...</p>
+      </div>
+    )
+  }
 
   const formatSize = (bytes: number) => {
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -124,18 +131,18 @@ export function DownloadProgress({ progress, status, onPauseResume, onCancel }: 
       {/* 当前批次 */}
       <div className="card p-6">
         <h4 className="font-semibold text-gray-900 mb-4">
-          当前批次: {progress.currentBatch.batchIndex + 1} / {progress.currentBatch.totalBatches}
+          当前批次: {(progress.currentBatch?.totalBatches || 0) > 0 ? (progress.currentBatch?.batchIndex || 0) + 1 : 0} / {progress.currentBatch?.totalBatches || 1}
         </h4>
         <div className="relative h-2 bg-gray-200 rounded-full overflow-hidden">
           <div
             className="absolute inset-y-0 left-0 bg-primary-400 rounded-full transition-all duration-300"
             style={{
-              width: `${(progress.currentBatch.completedFiles / progress.currentBatch.filesInBatch) * 100}%`,
+              width: `${(progress.currentBatch?.filesInBatch || 0) > 0 ? ((progress.currentBatch?.completedFiles || 0) / progress.currentBatch.filesInBatch) * 100 : 0}%`,
             }}
           />
         </div>
         <p className="mt-2 text-sm text-gray-500">
-          {progress.currentBatch.completedFiles} / {progress.currentBatch.filesInBatch} 个文件
+          {progress.currentBatch?.completedFiles || 0} / {progress.currentBatch?.filesInBatch || progress.totalFiles} 个文件
         </p>
       </div>
 
@@ -143,7 +150,7 @@ export function DownloadProgress({ progress, status, onPauseResume, onCancel }: 
       <div className="card p-6">
         <h4 className="font-semibold text-gray-900 mb-4">文件进度</h4>
         <div className="max-h-64 overflow-y-auto space-y-2">
-          {progress.fileProgress.slice(0, 20).map((file) => (
+          {(progress.fileProgress || []).filter(Boolean).slice(0, 20).map((file) => (
             <div
               key={file.taskId}
               className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"

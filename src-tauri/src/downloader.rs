@@ -1,16 +1,16 @@
 use crate::config::{AuthInfo, DownloadConfig, DownloadTask};
+use crate::obs_client::{check_obsutil, download_with_obsutil};
 use crate::scheduler::{Batch, TaskScheduler};
 use crate::checkpoint::{CheckpointData, CheckpointManager};
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
 /// 文件下载状态
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum FileStatus {
     Pending,
     Downloading,
@@ -20,6 +20,7 @@ pub enum FileStatus {
 
 /// 文件进度
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileProgress {
     pub task_id: String,
     pub filename: String,
@@ -30,6 +31,7 @@ pub struct FileProgress {
 
 /// 批次信息
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BatchInfo {
     pub batch_index: usize,
     pub total_batches: usize,
@@ -39,6 +41,7 @@ pub struct BatchInfo {
 
 /// 下载进度
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DownloadProgress {
     pub total_files: usize,
     pub completed_files: usize,
@@ -86,6 +89,18 @@ impl DownloadManager {
             .load(&config.export_id)?
             .unwrap_or_else(|| CheckpointData::new(config.export_id.clone(), config.clone()));
 
+        // 检查 obsutil 是否可用
+        if !check_obsutil() {
+            return Err(anyhow::anyhow!(
+                "obsutil 未安装。请先安装 obsutil:\n\
+                 1. 从 https://support.huaweicloud.com/utiltg-obs/obsutil_03_0001.html 下载\n\
+                 2. 解压后将 obsutil 添加到系统 PATH\n\
+                 3. 在终端运行 'obsutil version' 验证安装"
+            ));
+        }
+
+        tracing::info!("obsutil found, using it for downloads");
+
         Ok(Self {
             config,
             scheduler,
@@ -112,11 +127,19 @@ impl DownloadManager {
         let total_batches = batches.len();
         let total_files = self.config.tasks.len();
 
+        tracing::info!(
+            "Starting download: {} total files, {} pending files, {} batches",
+            total_files,
+            pending_tasks.len(),
+            total_batches
+        );
+
         let mut success_count = self.checkpoint.completed_tasks.len();
         let mut failed_count = self.checkpoint.failed_tasks.len();
 
         // 发送初始进度
         self.send_initial_progress(total_files, total_batches).await;
+        tracing::info!("Initial progress sent");
 
         for (idx, batch) in batches.iter().enumerate() {
             if !self.running.load(Ordering::SeqCst) {
@@ -333,7 +356,17 @@ impl DownloadManager {
                     return (task.id.clone(), false, Some("Cancelled".to_string()));
                 }
 
-                match download_file(&task, &download_dir, &auth, &endpoint, &bucket).await {
+                // 尝试下载，带重试机制
+                let result = download_with_retry(
+                    &task,
+                    &download_dir,
+                    &auth,
+                    &endpoint,
+                    &bucket,
+                    3, // 重试 3 次
+                ).await;
+
+                match result {
                     Ok(_) => (task.id.clone(), true, None),
                     Err(e) => (task.id.clone(), false, Some(e.to_string())),
                 }
@@ -367,99 +400,46 @@ impl DownloadManager {
     }
 }
 
-/// 下载单个文件
-async fn download_file(
+/// 带重试的下载函数
+async fn download_with_retry(
     task: &DownloadTask,
     download_dir: &PathBuf,
     auth: &AuthInfo,
     endpoint: &str,
     bucket: &str,
+    max_retries: u32,
 ) -> anyhow::Result<()> {
-    // 构建目标路径
-    let target_path = download_dir.join(&task.target);
+    let mut last_error = None;
 
-    // 创建父目录
-    if let Some(parent) = target_path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
+    for attempt in 1..=max_retries {
+        tracing::info!(
+            "Downloading {} (attempt {}/{})",
+            task.id,
+            attempt,
+            max_retries
+        );
 
-    // 构建 obsutil 命令
-    // 提取 object key 从 source (obs://bucket/key)
-    let object_key = task.source.trim_start_matches(&format!("obs://{}/", bucket));
-    let source_url = format!("obs://{}/{}", bucket, object_key);
+        let result = download_with_obsutil(task, download_dir, auth, endpoint, bucket).await;
 
-    // 构建命令
-    let output = Command::new("obsutil")
-        .args(&[
-            "cp",
-            "-f",
-            "-u",
-            &format!("-i={}", auth.ak),
-            &format!("-k={}", auth.sk),
-            &format!("-e={}", endpoint),
-            &source_url,
-            target_path.to_str().unwrap(),
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await;
+        match result {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                tracing::warn!("Download attempt {} failed: {}", attempt, e);
+                last_error = Some(e);
 
-    match output {
-        Ok(output) => {
-            if output.status.success() {
-                Ok(())
-            } else {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                Err(anyhow::anyhow!("obsutil failed: {}", stderr))
+                if attempt < max_retries {
+                    // 等待后重试
+                    let delay = Duration::from_secs(2u64.pow(attempt - 1));
+                    tracing::info!("Retrying after {:?}...", delay);
+                    sleep(delay).await;
+                }
             }
         }
-        Err(e) => {
-            // obsutil 可能不存在，尝试使用替代方案
-            tracing::warn!("obsutil not found or failed: {}, trying alternative", e);
-            download_file_with_curl(task, download_dir, auth, endpoint, bucket).await
-        }
-    }
-}
-
-/// 使用 curl 作为备选下载方案
-async fn download_file_with_curl(
-    task: &DownloadTask,
-    download_dir: &PathBuf,
-    auth: &AuthInfo,
-    endpoint: &str,
-    _bucket: &str,
-) -> anyhow::Result<()> {
-    // 构建目标路径
-    let target_path = download_dir.join(&task.target);
-
-    // 创建父目录
-    if let Some(parent) = target_path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
     }
 
-    // 构建 URL
-    let url = format!("https://{}/{}", endpoint, task.source.trim_start_matches("obs://"));
-
-    // 使用 curl 下载
-    let output = Command::new("curl")
-        .args(&[
-            "-L",
-            "-o",
-            target_path.to_str().unwrap(),
-            "-H",
-            &format!("Authorization: Bearer {}", auth.token),
-            &url,
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await?;
-
-    if output.status.success() {
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(anyhow::anyhow!("curl download failed: {}", stderr))
-    }
+    Err(anyhow::anyhow!(
+        "Download failed after {} attempts: {}",
+        max_retries,
+        last_error.unwrap_or_else(|| anyhow::anyhow!("Unknown error"))
+    ))
 }

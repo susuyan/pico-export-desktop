@@ -10,6 +10,7 @@ mod checkpoint;
 mod commands;
 mod config;
 mod downloader;
+mod obs_client;
 mod scheduler;
 
 use checkpoint::{CheckpointData, CheckpointManager};
@@ -105,6 +106,8 @@ async fn start_download(
     config: DownloadConfig,
     download_dir: String,
 ) -> Result<IpcResponse<()>, String> {
+    tracing::info!("Starting download to dir: {}", download_dir);
+
     // 创建下载目录
     let download_path = PathBuf::from(&download_dir);
     if let Err(e) = tokio::fs::create_dir_all(&download_path).await {
@@ -121,41 +124,38 @@ async fn start_download(
         checkpoint_manager,
     ) {
         Ok(manager) => manager,
-        Err(e) => return Ok(IpcResponse::error(format!("创建下载管理器失败: {}", e))),
+        Err(e) => {
+            tracing::error!("Failed to create download manager: {}", e);
+            return Ok(IpcResponse::error(format!("创建下载管理器失败: {}", e)));
+        }
     };
 
     // 创建进度通道
     let (progress_tx, mut progress_rx) = mpsc::channel::<DownloadProgress>(100);
     download_manager.set_progress_sender(progress_tx);
 
-    // 存储下载管理器
-    {
-        let mut manager_guard = state.download_manager.lock().await;
-        *manager_guard = Some(download_manager);
-    }
-
-    // 在后台任务中转发进度到前端
+    // 先启动进度转发任务
     let window_clone = window.clone();
-    tauri::async_runtime::spawn(async move {
+    let progress_handle = tauri::async_runtime::spawn(async move {
         while let Some(progress) = progress_rx.recv().await {
-            let _ = window_clone.emit("download:progress", progress);
+            let _ = window_clone.emit("download:progress", &progress);
+            tracing::debug!("Progress emitted: {}%", progress.overall_progress);
         }
+        tracing::info!("Progress channel closed");
     });
 
     // 在后台任务中执行下载
     let window_for_download = window.clone();
-    let download_manager_arc = Arc::clone(&state.download_manager);
 
     tauri::async_runtime::spawn(async move {
-        // 从 state 中获取下载管理器并执行下载
-        let result = {
-            let mut manager_guard = download_manager_arc.lock().await;
-            if let Some(ref mut download_manager) = *manager_guard {
-                download_manager.start().await
-            } else {
-                Err(anyhow::anyhow!("下载管理器未初始化"))
-            }
-        };
+        // 直接执行下载（不使用 state 存储，避免锁问题）
+        let result = download_manager.start().await;
+
+        // 重要：先掉落 download_manager，这样 progress_tx 会被关闭，progress_rx.recv() 才能结束
+        drop(download_manager);
+
+        // 现在等待进度通道关闭
+        progress_handle.await.ok();
 
         match result {
             Ok(download_result) => {
@@ -173,6 +173,7 @@ async fn start_download(
                 );
             }
             Err(e) => {
+                tracing::error!("Download failed: {}", e);
                 let _ = window_for_download.emit(
                     "download:error",
                     format!("下载失败: {}", e),
@@ -216,6 +217,35 @@ async fn cancel_download(state: State<'_, AppState>) -> Result<IpcResponse<()>, 
         Ok(IpcResponse::success(()))
     } else {
         Ok(IpcResponse::success(()))
+    }
+}
+
+// 重试失败的任务
+#[tauri::command]
+async fn retry_failed(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    download_dir: String,
+) -> Result<IpcResponse<()>, String> {
+    // 获取当前检查点
+    let checkpoint = {
+        let manager = &state.checkpoint_manager;
+        match manager.list_all() {
+            Ok(checkpoints) => {
+                checkpoints.into_iter()
+                    .filter(|c| !c.failed_tasks.is_empty())
+                    .max_by_key(|c| c.timestamp)
+            }
+            Err(_) => None
+        }
+    };
+
+    if let Some(checkpoint) = checkpoint {
+        // 清除失败状态，重新下载
+        let config = checkpoint.config;
+        start_download(window, state, config, download_dir).await
+    } else {
+        Ok(IpcResponse::error("没有可重试的失败任务"))
     }
 }
 
@@ -285,6 +315,7 @@ fn main() {
             resume_download,
             cancel_download,
             open_directory,
+            retry_failed,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
