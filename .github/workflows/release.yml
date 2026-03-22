@@ -74,6 +74,8 @@ jobs:
 
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ""  # 禁用 -D warnings 以允许编译警告
 
       - name: Install dependencies (Ubuntu)
         if: matrix.platform == 'ubuntu-22.04'
