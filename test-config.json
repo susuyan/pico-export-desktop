@@ -1,0 +1,43 @@
+{
+  "version": "2.0",
+  "export_id": "exp_20260322_143052",
+  "created_at": "2026-03-22T14:30:52.123456Z",
+  "expires_at": "2026-03-22T15:30:52.123456Z",
+  "endpoint": "obs.cn-central-221.ovaijisuan.com",
+  "bucket": "jushenshuzhi",
+  "auth": {
+    "ak": "STS.ABCD1234test",
+    "sk": "test-secret-key-xyz789",
+    "token": "test-security-token-abc123"
+  },
+  "tasks": [
+    {
+      "id": "task_0001",
+      "source": "obs://jushenshuzhi/collections/1/video_001.mp4",
+      "target": "pico_export_20260322_143052/TASK-001/videos/001_张三_32s_20260322.mp4",
+      "size": 15728640,
+      "checksum": null
+    },
+    {
+      "id": "task_0002",
+      "source": "obs://jushenshuzhi/collections/2/video_002.mp4",
+      "target": "pico_export_20260322_143052/TASK-001/videos/002_李四_45s_20260322.mp4",
+      "size": 23068672,
+      "checksum": null
+    },
+    {
+      "id": "task_0003",
+      "source": "obs://jushenshuzhi/collections/3/video_003.mp4",
+      "target": "pico_export_20260322_143052/TASK-002/videos/003_王五_28s_20260322.mp4",
+      "size": 11534336,
+      "checksum": null
+    }
+  ],
+  "total_files": 3,
+  "total_size": 50331648,
+  "suggested_strategy": {
+    "batch_size": 3,
+    "concurrent": 5,
+    "batch_interval_ms": 0
+  }
+}

@@ -37,7 +37,7 @@ pub fn get_obsutil_path() -> Option<String> {
 pub async fn install_obsutil() -> anyhow::Result<String> {
     // 根据平台确定下载 URL
     let (url, filename) = if cfg!(target_os = "macos") {
-        if cfg!(target_arch = "arm64") {
+        if cfg!(target_arch = "aarch64") {
             (
                 "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_darwin_arm64.tar.gz",
                 "obsutil_darwin_arm64.tar.gz",
@@ -115,7 +115,7 @@ fn find_obsutil_binary(dir: &std::path::Path) -> anyhow::Result<String> {
     };
 
     for entry in walkdir::WalkDir::new(dir) {
-        let entry = entry?;
+        let entry: walkdir::DirEntry = entry?;
         if entry.file_name() == obsutil_name {
             return Ok(entry.path().to_string_lossy().to_string());
         }

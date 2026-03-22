@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { invoke } from '@tauri-apps/api/tauri'
+import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { open } from '@tauri-apps/api/dialog'
-import { appWindow } from '@tauri-apps/api/window'
+import { open } from '@tauri-apps/plugin-dialog'
 
 import { Header } from '@/components/Header'
 import { TaskImport } from '@/components/TaskImport'
@@ -10,7 +9,7 @@ import { TaskPreview } from '@/components/TaskPreview'
 import { DownloadProgress as DownloadProgressPanel } from '@/components/DownloadProgress'
 import { DownloadComplete } from '@/components/DownloadComplete'
 import { useDownloadStore } from '@/stores/downloadStore'
-import type { DownloadConfig, DownloadProgress, IpcResponse } from '@/types'
+import type { DownloadConfig, DownloadProgress, IpcResponse, CheckpointData } from '@/types'
 
 function App() {
   const [activeView, setActiveView] = useState<'import' | 'preview' | 'downloading' | 'complete'>('import')
@@ -23,7 +22,6 @@ function App() {
     setStatus,
     progress,
     setProgress,
-    updateProgress,
     checkpoint,
     setCheckpoint,
     downloadDir,
@@ -95,7 +93,7 @@ function App() {
     const jsonFile = files.find((f) => f.name.endsWith('.json'))
 
     if (jsonFile) {
-      await loadConfig(jsonFile.path)
+      await loadConfig((jsonFile as any).path)
     }
   }, [])
 

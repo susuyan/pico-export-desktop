@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
 /// 文件下载状态
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum FileStatus {
     Pending,
     Downloading,
@@ -19,7 +19,7 @@ pub enum FileStatus {
 }
 
 /// 文件进度
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct FileProgress {
     pub task_id: String,
     pub filename: String,
@@ -29,7 +29,7 @@ pub struct FileProgress {
 }
 
 /// 批次信息
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct BatchInfo {
     pub batch_index: usize,
     pub total_batches: usize,
@@ -38,7 +38,7 @@ pub struct BatchInfo {
 }
 
 /// 下载进度
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DownloadProgress {
     pub total_files: usize,
     pub completed_files: usize,
@@ -65,7 +65,7 @@ pub struct DownloadResult {
 pub struct DownloadManager {
     config: DownloadConfig,
     scheduler: TaskScheduler,
-    checkpoint_manager: CheckpointManager,
+    checkpoint_manager: Arc<CheckpointManager>,
     checkpoint: CheckpointData,
     download_dir: PathBuf,
     running: Arc<AtomicBool>,
@@ -77,7 +77,7 @@ impl DownloadManager {
     pub fn new(
         config: DownloadConfig,
         download_dir: PathBuf,
-        checkpoint_manager: CheckpointManager,
+        checkpoint_manager: Arc<CheckpointManager>,
     ) -> anyhow::Result<Self> {
         let scheduler = TaskScheduler::from_config(&config);
 
@@ -110,9 +110,13 @@ impl DownloadManager {
         let pending_tasks = self.checkpoint.get_pending_tasks();
         let batches = self.scheduler.create_batches(&pending_tasks);
         let total_batches = batches.len();
+        let total_files = self.config.tasks.len();
 
         let mut success_count = self.checkpoint.completed_tasks.len();
         let mut failed_count = self.checkpoint.failed_tasks.len();
+
+        // 发送初始进度
+        self.send_initial_progress(total_files, total_batches).await;
 
         for (idx, batch) in batches.iter().enumerate() {
             if !self.running.load(Ordering::SeqCst) {
@@ -124,23 +128,40 @@ impl DownloadManager {
             self.checkpoint_manager.save(&self.checkpoint)?;
 
             // 执行批次下载
-            match self.download_batch(batch, idx, total_batches).await {
+            let batch_result = self.download_batch(batch, idx, total_batches).await;
+
+            match batch_result {
                 Ok(results) => {
-                    for (task_id, success, error) in results {
+                    for (task_id, success, _error) in results {
                         if success {
                             self.checkpoint.add_completed(task_id);
                             success_count += 1;
                         } else {
-                            self.checkpoint.add_failed(task_id.clone());
+                            self.checkpoint.add_failed(task_id);
                             failed_count += 1;
-                            tracing::error!("Download failed for {}: {}", task_id, error.unwrap_or_default());
                         }
                     }
                 }
                 Err(e) => {
                     tracing::error!("Batch {} download error: {}", idx, e);
+                    // 批次失败，标记该批次所有任务为失败
+                    for task in &batch.tasks {
+                        if !self.checkpoint.completed_tasks.contains(&task.id) {
+                            self.checkpoint.add_failed(task.id.clone());
+                            failed_count += 1;
+                        }
+                    }
                 }
             }
+
+            // 发送进度更新
+            self.send_progress(
+                success_count,
+                failed_count,
+                idx,
+                total_batches,
+                batch,
+            ).await;
 
             // 批次间停顿
             if idx < total_batches - 1 {
@@ -158,7 +179,7 @@ impl DownloadManager {
 
         // 如果全部完成，删除检查点
         if success_count >= self.config.tasks.len() {
-            self.checkpoint_manager.delete(&self.config.export_id)?;
+            let _ = self.checkpoint_manager.delete(&self.config.export_id);
         }
 
         Ok(DownloadResult {
@@ -166,6 +187,120 @@ impl DownloadManager {
             failed_count,
             failed_tasks: self.checkpoint.failed_tasks.clone(),
         })
+    }
+
+    /// 发送初始进度
+    async fn send_initial_progress(&self, total_files: usize, total_batches: usize) {
+        if let Some(ref tx) = self.progress_tx {
+            let file_progress: Vec<FileProgress> = self.config.tasks.iter().map(|task| {
+                let status = if self.checkpoint.completed_tasks.contains(&task.id) {
+                    FileStatus::Completed
+                } else if self.checkpoint.failed_tasks.contains(&task.id) {
+                    FileStatus::Failed("Download failed".to_string())
+                } else {
+                    FileStatus::Pending
+                };
+
+                FileProgress {
+                    task_id: task.id.clone(),
+                    filename: task.target.split('/').last().unwrap_or(&task.target).to_string(),
+                    status,
+                    progress: 0.0,
+                    speed: None,
+                }
+            }).collect();
+
+            let batch_info = BatchInfo {
+                batch_index: 0,
+                total_batches,
+                files_in_batch: 0,
+                completed_files: 0,
+            };
+
+            let progress = DownloadProgress {
+                total_files,
+                completed_files: self.checkpoint.completed_tasks.len(),
+                failed_files: self.checkpoint.failed_tasks.len(),
+                total_size: self.config.total_size,
+                downloaded_size: 0,
+                current_batch: batch_info,
+                file_progress,
+                overall_progress: 0.0,
+                speed: 0,
+                remaining_time: 0,
+                status: "downloading".to_string(),
+            };
+
+            let _ = tx.send(progress).await;
+        }
+    }
+
+    /// 发送进度更新
+    async fn send_progress(
+        &self,
+        completed_files: usize,
+        failed_files: usize,
+        current_batch_idx: usize,
+        total_batches: usize,
+        current_batch: &Batch,
+    ) {
+        if let Some(ref tx) = self.progress_tx {
+            let total_files = self.config.tasks.len();
+            let overall_progress = if total_files > 0 {
+                (completed_files as f64 / total_files as f64) * 100.0
+            } else {
+                0.0
+            };
+
+            let file_progress: Vec<FileProgress> = self.config.tasks.iter().map(|task| {
+                let is_completed = self.checkpoint.completed_tasks.contains(&task.id);
+                let is_failed = self.checkpoint.failed_tasks.contains(&task.id);
+
+                let (status, progress) = if is_completed {
+                    (FileStatus::Completed, 100.0)
+                } else if is_failed {
+                    (FileStatus::Failed("Download failed".to_string()), 0.0)
+                } else {
+                    (FileStatus::Pending, 0.0)
+                };
+
+                FileProgress {
+                    task_id: task.id.clone(),
+                    filename: task.target.split('/').last().unwrap_or(&task.target).to_string(),
+                    status,
+                    progress,
+                    speed: None,
+                }
+            }).collect();
+
+            // 计算当前批次已完成数量
+            let completed_in_batch = current_batch.tasks.iter()
+                .filter(|t| self.checkpoint.completed_tasks.contains(&t.id))
+                .count();
+
+            let batch_info = BatchInfo {
+                batch_index: current_batch_idx,
+                total_batches,
+                files_in_batch: current_batch.tasks.len(),
+                completed_files: completed_in_batch,
+            };
+
+            let progress = DownloadProgress {
+                total_files,
+                completed_files,
+                failed_files,
+                total_size: self.config.total_size,
+                downloaded_size: 0,
+                current_batch: batch_info,
+                file_progress,
+                overall_progress,
+                speed: 0,
+                remaining_time: 0,
+                status: if self.running.load(Ordering::SeqCst) { "downloading".to_string() } else { "paused".to_string() },
+            };
+
+            let _ = tx.send(progress).await;
+        }
     }
 
     /// 下载单个批次

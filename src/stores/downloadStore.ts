@@ -32,25 +32,6 @@ interface DownloadState {
   reset: () => void
 }
 
-const initialProgress: DownloadProgress = {
-  totalFiles: 0,
-  completedFiles: 0,
-  failedFiles: 0,
-  totalSize: 0,
-  downloadedSize: 0,
-  currentBatch: {
-    batchIndex: 0,
-    totalBatches: 0,
-    filesInBatch: 0,
-    completedFiles: 0,
-  },
-  fileProgress: [],
-  overallProgress: 0,
-  speed: 0,
-  remainingTime: 0,
-  status: 'idle',
-}
-
 export const useDownloadStore = create<DownloadState>((set) => ({
   config: null,
   setConfig: (config) => set({ config, status: 'loading' }),

@@ -2,9 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
-use std::sync::Mutex;
-use tauri::{Manager, State, Window};
-use tokio::sync::mpsc;
+use std::sync::Arc;
+use tauri::{Emitter, Manager, State, WebviewWindow};
+use tokio::sync::{mpsc, Mutex};
 
 mod checkpoint;
 mod commands;
@@ -18,8 +18,8 @@ use downloader::{DownloadManager, DownloadProgress};
 
 // 应用状态
 struct AppState {
-    checkpoint_manager: Mutex<CheckpointManager>,
-    download_manager: Mutex<Option<DownloadManager>>,
+    checkpoint_manager: Arc<CheckpointManager>,
+    download_manager: Arc<Mutex<Option<DownloadManager>>>,
 }
 
 #[derive(serde::Serialize)]
@@ -67,7 +67,7 @@ async fn load_config(path: String) -> Result<IpcResponse<DownloadConfig>, String
 async fn load_checkpoint(
     state: State<'_, AppState>,
 ) -> Result<IpcResponse<Option<CheckpointData>>, String> {
-    let manager = state.checkpoint_manager.lock().map_err(|e| e.to_string())?;
+    let manager = &state.checkpoint_manager;
 
     // 获取最新的检查点
     match manager.list_all() {
@@ -89,7 +89,7 @@ async fn clear_checkpoint(
     state: State<'_, AppState>,
     export_id: String,
 ) -> Result<IpcResponse<()>, String> {
-    let manager = state.checkpoint_manager.lock().map_err(|e| e.to_string())?;
+    let manager = &state.checkpoint_manager;
 
     match manager.delete(&export_id) {
         Ok(_) => Ok(IpcResponse::success(())),
@@ -100,28 +100,19 @@ async fn clear_checkpoint(
 // 开始下载
 #[tauri::command]
 async fn start_download(
-    window: Window,
+    window: WebviewWindow,
     state: State<'_, AppState>,
     config: DownloadConfig,
     download_dir: String,
 ) -> Result<IpcResponse<()>, String> {
     // 创建下载目录
-    let download_path = PathBuf::from(download_dir);
+    let download_path = PathBuf::from(&download_dir);
     if let Err(e) = tokio::fs::create_dir_all(&download_path).await {
         return Ok(IpcResponse::error(format!("创建下载目录失败: {}", e)));
     }
 
     // 获取检查点管理器
-    let checkpoint_manager = {
-        let guard = state.checkpoint_manager.lock().map_err(|e| e.to_string())?;
-        // 我们需要克隆管理器或者使用其他方式
-        // 这里简化处理，实际应该使用 Arc
-        drop(guard);
-        state
-            .checkpoint_manager
-            .lock()
-            .map_err(|e| e.to_string())?
-    };
+    let checkpoint_manager = Arc::clone(&state.checkpoint_manager);
 
     // 创建下载管理器
     let mut download_manager = match DownloadManager::new(
@@ -137,6 +128,12 @@ async fn start_download(
     let (progress_tx, mut progress_rx) = mpsc::channel::<DownloadProgress>(100);
     download_manager.set_progress_sender(progress_tx);
 
+    // 存储下载管理器
+    {
+        let mut manager_guard = state.download_manager.lock().await;
+        *manager_guard = Some(download_manager);
+    }
+
     // 在后台任务中转发进度到前端
     let window_clone = window.clone();
     tauri::async_runtime::spawn(async move {
@@ -145,18 +142,16 @@ async fn start_download(
         }
     });
 
-    // 存储下载管理器
-    {
-        let mut manager_guard = state.download_manager.lock().map_err(|e| e.to_string())?;
-        *manager_guard = Some(download_manager);
-    }
-
     // 在后台任务中执行下载
+    let window_for_download = window.clone();
+    let download_manager_arc = Arc::clone(&state.download_manager);
+
     tauri::async_runtime::spawn(async move {
+        // 从 state 中获取下载管理器并执行下载
         let result = {
-            let mut manager_guard = state.download_manager.lock().unwrap();
-            if let Some(ref mut manager) = *manager_guard {
-                manager.start().await
+            let mut manager_guard = download_manager_arc.lock().await;
+            if let Some(ref mut download_manager) = *manager_guard {
+                download_manager.start().await
             } else {
                 Err(anyhow::anyhow!("下载管理器未初始化"))
             }
@@ -165,16 +160,20 @@ async fn start_download(
         match result {
             Ok(download_result) => {
                 let success = download_result.failed_count == 0;
-                let _ = window.emit(
+                let _ = window_for_download.emit(
                     "download:complete",
                     serde_json::json!({
                         "success": success,
-                        "message": if success { "下载完成" } else { "部分文件下载失败" }
+                        "message": if success {
+                            format!("下载完成，成功 {} 个文件", download_result.success_count)
+                        } else {
+                            format!("下载完成，成功 {} 个，失败 {} 个", download_result.success_count, download_result.failed_count)
+                        }
                     }),
                 );
             }
             Err(e) => {
-                let _ = window.emit(
+                let _ = window_for_download.emit(
                     "download:error",
                     format!("下载失败: {}", e),
                 );
@@ -188,7 +187,7 @@ async fn start_download(
 // 暂停下载
 #[tauri::command]
 async fn pause_download(state: State<'_, AppState>) -> Result<IpcResponse<()>, String> {
-    let manager_guard = state.download_manager.lock().map_err(|e| e.to_string())?;
+    let manager_guard = state.download_manager.lock().await;
     if let Some(ref manager) = *manager_guard {
         manager.pause();
         Ok(IpcResponse::success(()))
@@ -200,8 +199,8 @@ async fn pause_download(state: State<'_, AppState>) -> Result<IpcResponse<()>, S
 // 继续下载
 #[tauri::command]
 async fn resume_download(
-    window: Window,
-    state: State<'_, AppState>,
+    _window: WebviewWindow,
+    _state: State<'_, AppState>,
 ) -> Result<IpcResponse<()>, String> {
     // 简化为重新开始
     // 实际应该恢复之前的下载管理器状态
@@ -211,7 +210,7 @@ async fn resume_download(
 // 取消下载
 #[tauri::command]
 async fn cancel_download(state: State<'_, AppState>) -> Result<IpcResponse<()>, String> {
-    let manager_guard = state.download_manager.lock().map_err(|e| e.to_string())?;
+    let manager_guard = state.download_manager.lock().await;
     if let Some(ref manager) = *manager_guard {
         manager.pause();
         Ok(IpcResponse::success(()))
@@ -223,7 +222,27 @@ async fn cancel_download(state: State<'_, AppState>) -> Result<IpcResponse<()>, 
 // 打开目录
 #[tauri::command]
 async fn open_directory(path: String) -> Result<(), String> {
-    let _ = open::that_detached(path);
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -249,9 +268,13 @@ fn main() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_shell::init())
         .manage(AppState {
-            checkpoint_manager: Mutex::new(checkpoint_manager),
-            download_manager: Mutex::new(None),
+            checkpoint_manager: Arc::new(checkpoint_manager),
+            download_manager: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
             load_config,
@@ -266,8 +289,9 @@ fn main() {
         .setup(|app| {
             #[cfg(debug_assertions)]
             {
-                let window = app.get_window("main").unwrap();
-                window.open_devtools();
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.open_devtools();
+                }
             }
             Ok(())
         })
