@@ -1,0 +1,95 @@
+name: Setup Windows Tauri build deps
+description: Install and cache Rust, Node.js, and Tauri build dependencies for Windows
+
+runs:
+  using: composite
+  steps:
+    # Node.js cache
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: 'npm'
+
+    # Rust toolchain with cache
+    - name: Install Rust stable
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        rustflags: ""
+        cache-workspaces: "src-tauri"
+
+    # Cargo cache (additional layer for registry)
+    - name: Cargo registry cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
+
+    # Tauri CLI cache
+    - name: Tauri CLI cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/cargo-tauri.exe
+          ~/.cargo/bin/tauri.exe
+        key: ${{ runner.os }}-tauri-cli-v2
+
+    # Install Tauri CLI if not cached
+    - name: Install Tauri CLI
+      shell: pwsh
+      run: |
+        if (!(Get-Command cargo-tauri -ErrorAction SilentlyContinue)) {
+          cargo install tauri-cli --version "^2.0.0"
+        }
+
+    # npm dependencies cache (as backup to setup-node)
+    - name: npm cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          node_modules
+          ~
+        key: ${{ runner.os }}-npm-${{ hashFiles('package-lock.json', 'package.json') }}
+        restore-keys: |
+          ${{ runner.os }}-npm-
+
+    # Install npm dependencies
+    - name: Install npm dependencies
+      shell: pwsh
+      run: npm ci
+
+    # Tauri build cache (for incremental builds)
+    - name: Tauri build cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          src-tauri/target/release/build
+          src-tauri/target/release/.fingerprint
+        key: ${{ runner.os }}-tauri-build-${{ hashFiles('src-tauri/src/**/*.rs', 'src/**/*') }}
+        restore-keys: |
+          ${{ runner.os }}-tauri-build-
+
+    # Windows SDK cache (for native dependencies)
+    - name: Windows SDK cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~
+        key: ${{ runner.os }}-sdk-v0
+        restore-keys: |
+          ${{ runner.os }}-sdk-
+
+    # Verify installation
+    - name: Verify tools
+      shell: pwsh
+      run: |
+        Write-Host "✅ Node.js: $(node --version)"
+        Write-Host "✅ npm: $(npm --version)"
+        Write-Host "✅ Rust: $(rustc --version)"
+        Write-Host "✅ Cargo: $(cargo --version)"
+        Write-Host "✅ Tauri CLI: $(cargo tauri --version)"
