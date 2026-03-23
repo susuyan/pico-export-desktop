@@ -55,11 +55,12 @@
     ],
     "resources": ["Resources/**/*"],
     "macOS": {
-      "entitlements": null,
+      "entitlements": "entitlements.plist",
       "exceptionDomain": "",
       "frameworks": [],
       "providerShortName": null,
-      "signingIdentity": null
+      "signingIdentity": "-",
+      "hardenedRuntime": true
     },
     "windows": {
       "certificateThumbprint": null,
