@@ -1,0 +1,101 @@
+name: Setup macOS Tauri build deps
+description: Install and cache Rust, Node.js, and Tauri build dependencies for macOS
+
+runs:
+  using: composite
+  steps:
+    # Node.js cache
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: 'npm'
+
+    # Rust toolchain with cache
+    - name: Install Rust stable
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        rustflags: ""
+        cache-workspaces: "src-tauri"
+
+    # Install target platforms for universal binary
+    - name: Install Rust targets
+      shell: bash
+      run: |
+        rustup target add aarch64-apple-darwin
+        rustup target add x86_64-apple-darwin
+
+    # Cargo cache (additional layer for registry)
+    - name: Cargo registry cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: ${{ runner.os }}-${{ runner.arch }}-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-cargo-registry-
+
+    # Tauri CLI cache
+    - name: Tauri CLI cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/cargo-tauri
+          ~/.cargo/bin/tauri
+        key: ${{ runner.os }}-${{ runner.arch }}-tauri-cli-v2
+
+    # Install Tauri CLI if not cached
+    - name: Install Tauri CLI
+      shell: bash
+      run: |
+        if ! command -v cargo-tauri &> /dev/null; then
+          cargo install tauri-cli --version "^2.0.0"
+        fi
+
+    # npm dependencies cache (as backup to setup-node)
+    - name: npm cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          node_modules
+          ~/.npm
+        key: ${{ runner.os }}-${{ runner.arch }}-npm-${{ hashFiles('package-lock.json', 'package.json') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-npm-
+
+    # Install npm dependencies
+    - name: Install npm dependencies
+      shell: bash
+      run: npm ci
+
+    # Tauri build cache (for incremental builds)
+    - name: Tauri build cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          src-tauri/target/release/build
+          src-tauri/target/release/.fingerprint
+        key: ${{ runner.os }}-${{ runner.arch }}-tauri-build-${{ hashFiles('src-tauri/src/**/*.rs', 'src/**/*') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-tauri-build-
+
+    # Xcode compilation cache (for native dependencies)
+    - name: Xcode compilation cache
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Developer/Xcode/DerivedData/CompilationCache.noindex
+        key: ${{ runner.os }}-${{ runner.arch }}-xcode-compilation-cache-v0
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-xcode-compilation-cache-
+
+    # Verify installation
+    - name: Verify tools
+      shell: bash
+      run: |
+        echo "✅ Node.js: $(node --version)"
+        echo "✅ npm: $(npm --version)"
+        echo "✅ Rust: $(rustc --version)"
+        echo "✅ Cargo: $(cargo --version)"
+        echo "✅ Tauri CLI: $(cargo tauri --version)"

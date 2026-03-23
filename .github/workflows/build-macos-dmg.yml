@@ -1,0 +1,125 @@
+name: Build macOS DMG
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Build target'
+        required: true
+        default: 'universal'
+        type: choice
+        options:
+          - universal
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+      sign:
+        description: 'Sign the app'
+        required: false
+        default: true
+        type: boolean
+      notarize:
+        description: 'Notarize the app (requires sign=true)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup macOS Tauri build deps
+        uses: ./.github/actions/setup-macos-tauri
+
+      - name: Determine target
+        id: target
+        run: |
+          if [ "${{ github.event.inputs.target }}" = "universal" ]; then
+            echo "args=--target universal-apple-darwin" >> "$GITHUB_OUTPUT"
+            echo "suffix=universal" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.inputs.target }}" = "aarch64-apple-darwin" ]; then
+            echo "args=--target aarch64-apple-darwin" >> "$GITHUB_OUTPUT"
+            echo "suffix=aarch64" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=--target x86_64-apple-darwin" >> "$GITHUB_OUTPUT"
+            echo "suffix=x64" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Import Apple Developer Certificate
+        if: github.event.inputs.sign == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+
+      - name: Build Tauri App
+        id: build
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cd src-tauri
+          cargo tauri build ${{ steps.target.outputs.args }}
+
+      - name: Notarize
+        if: github.event.inputs.notarize == 'true' && github.event.inputs.sign == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          DMG_PATH=$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -maxdepth 1 -print -quit)
+          if [ -z "$DMG_PATH" ]; then
+            echo "❌ DMG not found"
+            exit 1
+          fi
+          echo "📤 Submitting for notarization: $DMG_PATH"
+          xcrun notarytool submit "$DMG_PATH" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --wait
+          echo "📎 Stapling ticket..."
+          xcrun stapler staple "$DMG_PATH"
+          echo "✅ Notarization complete"
+
+      - name: Verify signature
+        if: github.event.inputs.sign == 'true'
+        run: |
+          APP_PATH=$(find src-tauri/target/release/bundle/macos -name '*.app' -maxdepth 1 -print -quit)
+          echo "Verifying: $APP_PATH"
+          codesign -vvv --deep --strict "$APP_PATH"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg-${{ steps.target.outputs.suffix }}
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app
+          if-no-files-found: error
+
+      - name: Upload to release
+        if: github.ref_type == 'tag'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DMG_PATH=$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -maxdepth 1 -print -quit)
+          if [ -n "$DMG_PATH" ]; then
+            gh release upload "${{ github.ref_name }}" "$DMG_PATH" --clobber || true
+          fi
