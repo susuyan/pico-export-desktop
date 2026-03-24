@@ -167,31 +167,25 @@ jobs:
           script: |
             const fs = require('fs');
             const body = fs.readFileSync('release_notes.txt', 'utf8');
-            // Get release by tag name - use github.ref_name for tag push events
             const tag = '${{ github.ref_name }}';
             console.log('Looking for release with tag:', tag);
-            try {
-              const { data: release } = await github.rest.repos.getReleaseByTag({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag: tag
-              });
-              console.log('Found release ID:', release.id);
-              await github.rest.repos.updateRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                release_id: release.id,
-                body: body
-              });
-              console.log('Release updated successfully');
-            } catch (error) {
-              console.error('Error finding/updating release:', error.message);
-              // List all releases to debug
-              const { data: releases } = await github.rest.repos.listReleases({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                per_page: 5
-              });
-              console.log('Available releases:', releases.map(r => ({ tag: r.tag_name, id: r.id, draft: r.draft })));
-              throw error;
+            // List releases and find by tag (handles draft releases better)
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 10
+            });
+            const release = releases.find(r => r.tag_name === tag);
+            if (!release) {
+              console.error('Available releases:', releases.map(r => ({ tag: r.tag_name, id: r.id, draft: r.draft })));
+              core.setFailed('Release not found for tag: ' + tag);
+              return;
             }
+            console.log('Found release ID:', release.id, 'draft:', release.draft);
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.id,
+              body: body
+            });
+            console.log('Release updated successfully');
