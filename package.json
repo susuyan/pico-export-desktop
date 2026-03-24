@@ -1,6 +1,6 @@
 {
   "name": "pico-export-desktop",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "description": "Pico Export Desktop - 跨平台数据下载工具",
   "type": "module",
   "scripts": {
