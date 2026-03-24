@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g., 0.0.5)'
+        description: 'Version to release (e.g., 0.0.7)'
         required: true
         type: string
 
@@ -81,7 +81,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          echo $APPLE_CERTIFICATE | base64 --decode > certificate.p12
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
@@ -162,51 +162,24 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/checkout@v4
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          # Use Makefile to generate release notes
+          make ci-release-notes \
+            VERSION_TAG="${{ needs.create-release.outputs.version }}" \
+            MACOS_STATUS="${{ needs.build-macos.result }}" \
+            WINDOWS_STATUS="${{ needs.build-windows.result }}" \
+            LINUX_STATUS="${{ needs.build-linux.result }}" > release_notes.txt
+
+      - name: Update Release
+        uses: actions/github-script@v7
         with:
           script: |
-            const results = {
-              macos: '${{ needs.build-macos.result }}',
-              windows: '${{ needs.build-windows.result }}',
-              linux: '${{ needs.build-linux.result }}'
-            };
-
-            const check = (status) => status === 'success' ? '✅' : '❌';
-
-            const body = `## Pico Export Desktop ${{ needs.create-release.outputs.version }}
-
-### Downloads
-
-${check(results.macos)} **macOS**
-- Apple Silicon (M1/M2/M3) - .dmg
-- Intel (x64) - .dmg
-
-${check(results.windows)} **Windows** (x64) - .exe
-
-${check(results.linux)} **Linux** (x64) - .deb
-
-### Installation
-
-**macOS:**
-\`\`\`bash
-# Download .dmg, open and drag to Applications
-\`\`\`
-
-**Windows:**
-\`\`\`powershell
-# Download and run .exe installer
-\`\`\`
-
-**Linux:**
-\`\`\`bash
-# Download and install .deb
-sudo apt install ./pico-export-desktop_*.deb
-\`\`\`
-
----
-
-*Built with ❤️ using Tauri + React*`;
-
+            const fs = require('fs');
+            const body = fs.readFileSync('release_notes.txt', 'utf8');
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,

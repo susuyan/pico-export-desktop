@@ -191,3 +191,69 @@ clean:  # Clean build artifacts
 run: dev
 sign: sign-local
 check-sign: sign-verify
+
+# =============================================================================
+# CI targets - 用于 GitHub Actions
+# =============================================================================
+
+# CI 使用的 macOS 构建目标
+# 用法: make ci-build-macos TARGET=aarch64-apple-darwin
+CI_TARGET ?= aarch64-apple-darwin
+.PHONY: ci-build-macos
+ci-build-macos:
+	@echo "🔨 CI build for macOS ($(CI_TARGET))..."
+	@cd $(TAURI_DIR) && cargo tauri build --target $(CI_TARGET)
+
+# CI 使用的 Linux 构建目标
+.PHONY: ci-build-linux
+ci-build-linux:
+	@echo "🔨 CI build for Linux..."
+	@cd $(TAURI_DIR) && cargo tauri build
+
+# 生成 Release Notes（供 GitHub Actions 使用）
+# 用法: make ci-release-notes VERSION=0.0.7 MACOS_STATUS=success WINDOWS_STATUS=success LINUX_STATUS=failure
+MACOS_STATUS ?= unknown
+WINDOWS_STATUS ?= unknown
+LINUX_STATUS ?= unknown
+VERSION_TAG ?= v0.0.0
+
+.PHONY: ci-release-notes
+ci-release-notes:
+	@MACOS_EMOJI=$$([ "$(MACOS_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
+	WINDOWS_EMOJI=$$([ "$(WINDOWS_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
+	LINUX_EMOJI=$$([ "$(LINUX_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
+	cat << EOF
+	## Pico Export Desktop $(VERSION_TAG)
+
+	### Downloads
+
+	$$MACOS_EMOJI **macOS**
+	- Apple Silicon (M1/M2/M3) - .dmg
+	- Intel (x64) - .dmg
+
+	$$WINDOWS_EMOJI **Windows** (x64) - .exe
+
+	$$LINUX_EMOJI **Linux** (x64) - .deb
+
+	### Installation
+
+	**macOS:**
+	\`\`\`bash
+	# Download .dmg, open and drag to Applications
+	\`\`\`
+
+	**Windows:**
+	\`\`\`powershell
+	# Download and run .exe installer
+	\`\`\`
+
+	**Linux:**
+	\`\`\`bash
+	# Download and install .deb
+	sudo apt install ./pico-export-desktop_*.deb
+	\`\`\`
+
+	---
+
+	*Built with ❤️ using Tauri + React*
+	EOF
