@@ -76,6 +76,19 @@ jobs:
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: make ci-import-cert
 
+      - name: Sign obsutil binary
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          OBSUTIL_PATH="src-tauri/Resources/bin/obsutil"
+          if [ -f "$OBSUTIL_PATH" ]; then
+            echo "Signing obsutil binary..."
+            codesign --force --options runtime --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$OBSUTIL_PATH"
+            codesign -dvv "$OBSUTIL_PATH" | head -5
+          else
+            echo "obsutil not found at $OBSUTIL_PATH, skipping..."
+          fi
+
       - name: Build
         uses: tauri-apps/tauri-action@v0
         env:
@@ -150,13 +163,20 @@ jobs:
 
       - name: Update Release
         uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
         with:
           script: |
             const fs = require('fs');
             const body = fs.readFileSync('release_notes.txt', 'utf8');
+            const releaseId = process.env.RELEASE_ID;
+            if (!releaseId) {
+              core.setFailed('Release ID not found');
+              return;
+            }
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: ${{ needs.create-release.outputs.release_id }},
+              release_id: parseInt(releaseId),
               body: body
             });
