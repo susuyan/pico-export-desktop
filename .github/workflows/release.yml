@@ -18,7 +18,7 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     outputs:
-      release_id: ${{ steps.create-release.outputs.result }}
+      release_id: ${{ steps.create-release.outputs.release_id }}
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +48,11 @@ jobs:
               draft: true,
               prerelease: false
             });
-            core.setOutput('result', data.id);
+            // Write to GITHUB_OUTPUT for cross-job compatibility
+            const fs = require('fs');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `release_id=${data.id}\n`);
+            console.log('Created release with ID:', data.id);
+            return data.id;
 
   build-macos:
     needs: create-release
@@ -167,7 +171,7 @@ jobs:
           script: |
             const fs = require('fs');
             const body = fs.readFileSync('release_notes.txt', 'utf8');
-            const tag = '${{ github.ref_name }}';
+            const tag = '${{ needs.create-release.outputs.version }}';
             console.log('Looking for release with tag:', tag);
             // List releases and find by tag (handles draft releases better)
             const { data: releases } = await github.rest.repos.listReleases({
