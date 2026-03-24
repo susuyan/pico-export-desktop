@@ -1,6 +1,6 @@
 [package]
 name = "pico-export-desktop"
-version = "0.0.8"
+version = "0.0.9"
 description = "Pico Export Desktop - 跨平台数据下载工具"
 authors = ["Pico Team"]
 license = "MIT"
