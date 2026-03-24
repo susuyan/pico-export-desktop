@@ -24,29 +24,48 @@ SIGNING_IDENTITY := $(shell security find-identity -v -p codesigning 2>/dev/null
 endif
 TEAM_ID ?= $(shell echo "$(SIGNING_IDENTITY)" | grep -oE '\([A-Z0-9]{10}\)$$' | tr -d '()' 2>/dev/null)
 
+# CI signing configuration (from environment)
+APPLE_CERTIFICATE ?=
+APPLE_CERTIFICATE_PASSWORD ?=
+KEYCHAIN_PASSWORD ?=
+
 # Default target
 .DEFAULT_GOAL := help
-.PHONY: help dev build sign-local sign-verify notarize bump-version bump-and-release clean release-local
+.PHONY: help dev build build-ci sign sign-verify notarize install-dev install-release \
+        bump-version release release-local clean ci-build-macos ci-build-linux ci-build-windows \
+        ci-import-cert ci-release-notes
+
+# =============================================================================
+# Help
+# =============================================================================
 
 help:  # Display this help.
 	@-+echo "Run make with one of the following targets:"
 	@-+echo
 	@-+grep -Eh "^[a-z-]+:.*#" $(CURRENT_MAKEFILE_PATH) | sed -E 's/^(.*:)(.*#+)(.*)/  \1 @@@ \3 /' | column -t -s "@@@"
 
+# =============================================================================
+# Development
+# =============================================================================
+
 dev:  # Run development server
 	@echo "Starting Tauri dev..."
 	cd $(CURRENT_MAKEFILE_DIR) && npm run tauri:dev
 
-build:  # Build the app (Release)
-	@echo "Building Tauri app..."
+build:  # Build the app (Release) for local development
+	@echo "🔨 Building Tauri app..."
 	cd $(CURRENT_MAKEFILE_DIR) && npm run build
 	cd $(TAURI_DIR) && cargo tauri build
 
 build-universal:  # Build Universal macOS binary (Intel + Apple Silicon)
-	@echo "Building Universal macOS binary..."
+	@echo "🔨 Building Universal macOS binary..."
 	cd $(TAURI_DIR) && cargo tauri build --target universal-apple-darwin
 
-sign-local: build  # Sign the app locally with Developer ID
+# =============================================================================
+# Local Signing & Distribution
+# =============================================================================
+
+sign: build  # Sign the app locally with Developer ID
 	@if [ -z "$(SIGNING_IDENTITY)" ]; then \
 		echo "❌ Error: No Developer ID Application identity found"; \
 		echo "Please ensure you have a Developer ID certificate in your keychain"; \
@@ -84,7 +103,7 @@ sign-verify:  # Verify app signature
 	echo "Verifying: $$APP_PATH"; \
 	codesign -vvv --deep --strict "$$APP_PATH"
 
-notarize: sign-local  # Notarize the signed app (requires APPLE_ID and APPLE_APP_SPECIFIC_PASSWORD env vars)
+notarize: sign  # Notarize the signed app (requires APPLE_ID and APPLE_APP_SPECIFIC_PASSWORD env vars)
 	@if [ -z "$(APPLE_ID)" ]; then \
 		echo "❌ Error: APPLE_ID environment variable not set"; \
 		exit 1; \
@@ -127,7 +146,7 @@ install-dev:  # Install development build to /Applications
 	cp -R "$$APP_PATH" "$$DST"; \
 	echo "✅ Installed to $$DST"
 
-install-release: sign-local  # Build, sign, and install release version to /Applications
+install-release: sign  # Build, sign, and install release version to /Applications
 	@APP_PATH=$$(find $(TAURI_DIR)/target/release/bundle/macos -name '*.app' -maxdepth 1 -print -quit); \
 	PRODUCT=$$(basename "$$APP_PATH"); \
 	DST="/Applications/$$PRODUCT"; \
@@ -136,14 +155,18 @@ install-release: sign-local  # Build, sign, and install release version to /Appl
 	cp -R "$$APP_PATH" "$$DST"; \
 	echo "✅ Installed release build to $$DST"
 
-bump-version:  # Bump version (usage: make bump-version VERSION=0.0.2)
+# =============================================================================
+# Version Management
+# =============================================================================
+
+bump-version:  # Bump version (usage: make bump-version VERSION=0.0.8)
 	@if [ -z "$(VERSION)" ]; then \
 		echo "❌ Error: VERSION not specified"; \
-		echo "Usage: make bump-version VERSION=0.0.2"; \
+		echo "Usage: make bump-version VERSION=0.0.8"; \
 		exit 1; \
 	fi; \
 	if ! echo "$(VERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$'; then \
-		echo "❌ Error: VERSION must be in semver format (e.g., 0.0.2)"; \
+		echo "❌ Error: VERSION must be in semver format (e.g., 0.0.8)"; \
 		exit 1; \
 	fi; \
 	\
@@ -178,7 +201,7 @@ release: bump-version  # Bump version and trigger GitHub Actions release
 	echo "🔗 Release will be available at:"; \
 	echo "   https://github.com/$(shell git remote get-url origin | sed 's/.*github\.com[:/]\(.*\)\.git/\1/')/releases"
 
-release-local: clean build sign-local notarize  # Complete local release: build + sign + notarize
+release-local: clean build sign notarize  # Complete local release: build + sign + notarize
 	echo "🎉 Local release complete!"
 
 clean:  # Clean build artifacts
@@ -187,35 +210,47 @@ clean:  # Clean build artifacts
 	rm -rf $(DIST_DIR)
 	rm -rf $(TAURI_DIR)/target
 
-# Aliases
-run: dev
-sign: sign-local
-check-sign: sign-verify
-
 # =============================================================================
 # CI targets - 用于 GitHub Actions
 # =============================================================================
 
+# CI 使用的 macOS 导入证书
+# 用法: make ci-import-cert APPLE_CERTIFICATE=... APPLE_CERTIFICATE_PASSWORD=... KEYCHAIN_PASSWORD=...
+ci-import-cert:
+	@if [ -z "$(APPLE_CERTIFICATE)" ]; then \
+		echo "⚠️  APPLE_CERTIFICATE not set, skipping certificate import"; \
+		exit 0; \
+	fi; \
+	echo "🔐 Importing certificate..."; \
+	echo "$(APPLE_CERTIFICATE)" | base64 --decode > /tmp/certificate.p12; \
+	security create-keychain -p "$(KEYCHAIN_PASSWORD)" build.keychain || true; \
+	security default-keychain -s build.keychain; \
+	security unlock-keychain -p "$(KEYCHAIN_PASSWORD)" build.keychain; \
+	security import /tmp/certificate.p12 -k build.keychain -P "$(APPLE_CERTIFICATE_PASSWORD)" -T /usr/bin/codesign; \
+	security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$(KEYCHAIN_PASSWORD)" build.keychain
+
 # CI 使用的 macOS 构建目标
 # 用法: make ci-build-macos TARGET=aarch64-apple-darwin
-CI_TARGET ?= aarch64-apple-darwin
-.PHONY: ci-build-macos
 ci-build-macos:
-	@echo "🔨 CI build for macOS ($(CI_TARGET))..."
-	@cd $(TAURI_DIR) && cargo tauri build --target $(CI_TARGET)
+	@echo "🔨 CI build for macOS ($(TARGET))..."
+	cd $(TAURI_DIR) && cargo tauri build --target $(TARGET)
+
+# CI 使用的 Windows 构建目标
+ci-build-windows:
+	@echo "🔨 CI build for Windows..."
+	cd $(TAURI_DIR) && cargo tauri build
 
 # CI 使用的 Linux 构建目标
-.PHONY: ci-build-linux
 ci-build-linux:
 	@echo "🔨 CI build for Linux..."
-	@cd $(TAURI_DIR) && cargo tauri build
+	cd $(TAURI_DIR) && cargo tauri build
 
 # 生成 Release Notes（供 GitHub Actions 使用）
-# 用法: make ci-release-notes VERSION=0.0.7 MACOS_STATUS=success WINDOWS_STATUS=success LINUX_STATUS=failure
+# 用法: make ci-release-notes VERSION_TAG=v0.0.8 MACOS_STATUS=success WINDOWS_STATUS=success LINUX_STATUS=failure
+VERSION_TAG ?= v0.0.0
 MACOS_STATUS ?= unknown
 WINDOWS_STATUS ?= unknown
 LINUX_STATUS ?= unknown
-VERSION_TAG ?= v0.0.0
 
 .PHONY: ci-release-notes
 ci-release-notes:
@@ -223,37 +258,37 @@ ci-release-notes:
 	WINDOWS_EMOJI=$$([ "$(WINDOWS_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
 	LINUX_EMOJI=$$([ "$(LINUX_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
 	cat << EOF
-	## Pico Export Desktop $(VERSION_TAG)
+## Pico Export Desktop $(VERSION_TAG)
 
-	### Downloads
+### Downloads
 
-	$$MACOS_EMOJI **macOS**
-	- Apple Silicon (M1/M2/M3) - .dmg
-	- Intel (x64) - .dmg
+$$MACOS_EMOJI **macOS**
+- Apple Silicon (M1/M2/M3) - .dmg
+- Intel (x64) - .dmg
 
-	$$WINDOWS_EMOJI **Windows** (x64) - .exe
+$$WINDOWS_EMOJI **Windows** (x64) - .exe
 
-	$$LINUX_EMOJI **Linux** (x64) - .deb
+$$LINUX_EMOJI **Linux** (x64) - .deb
 
-	### Installation
+### Installation
 
-	**macOS:**
-	\`\`\`bash
-	# Download .dmg, open and drag to Applications
-	\`\`\`
+**macOS:**
+\`\`\`bash
+# Download .dmg, open and drag to Applications
+\`\`\`
 
-	**Windows:**
-	\`\`\`powershell
-	# Download and run .exe installer
-	\`\`\`
+**Windows:**
+\`\`\`powershell
+# Download and run .exe installer
+\`\`\`
 
-	**Linux:**
-	\`\`\`bash
-	# Download and install .deb
-	sudo apt install ./pico-export-desktop_*.deb
-	\`\`\`
+**Linux:**
+\`\`\`bash
+# Download and install .deb
+sudo apt install ./pico-export-desktop_*.deb
+\`\`\`
 
-	---
+---
 
-	*Built with ❤️ using Tauri + React*
-	EOF
+*Built with ❤️ using Tauri + React*
+EOF

@@ -1,0 +1,44 @@
+name: Setup Tauri build deps
+description: Install Node.js, Rust, and setup caching for Tauri builds
+
+inputs:
+  node-version:
+    description: 'Node.js version'
+    required: false
+    default: '20'
+  rust-toolchain:
+    description: 'Rust toolchain'
+    required: false
+    default: 'stable'
+  platform:
+    description: 'Platform identifier for cache keys'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: 'npm'
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ inputs.rust-toolchain }}
+
+    - name: Rust cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          src-tauri/target
+        key: ${{ inputs.platform }}-cargo-v0-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ inputs.platform }}-cargo-v0-
+
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
