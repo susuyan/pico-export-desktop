@@ -63,13 +63,7 @@
       "frameworks": [],
       "providerShortName": "${APPLE_TEAM_ID}",
       "signingIdentity": "${APPLE_SIGNING_IDENTITY}",
-      "hardenedRuntime": true,
-      "notarize": {
-        "enabled": true,
-        "appleId": "${APPLE_ID}",
-        "password": "${APPLE_APP_SPECIFIC_PASSWORD}",
-        "teamId": "${APPLE_TEAM_ID}"
-      }
+      "hardenedRuntime": true
     },
     "windows": {
       "certificateThumbprint": null,
