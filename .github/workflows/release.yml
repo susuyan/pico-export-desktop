@@ -67,6 +67,7 @@ jobs:
         uses: ./.github/actions/setup-tauri
         with:
           platform: macos-latest
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Import Certificate
         env:

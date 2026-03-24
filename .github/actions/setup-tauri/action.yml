@@ -13,6 +13,10 @@ inputs:
   platform:
     description: 'Platform identifier for cache keys'
     required: true
+  targets:
+    description: 'Rust targets to install (comma-separated)'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -27,6 +31,7 @@ runs:
       uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: ${{ inputs.rust-toolchain }}
+        targets: ${{ inputs.targets }}
 
     - name: Rust cache
       uses: actions/cache@v4
