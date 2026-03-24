@@ -257,38 +257,13 @@ ci-release-notes:
 	@MACOS_EMOJI=$$([ "$(MACOS_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
 	WINDOWS_EMOJI=$$([ "$(WINDOWS_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
 	LINUX_EMOJI=$$([ "$(LINUX_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
-	cat << EOF
-## Pico Export Desktop $(VERSION_TAG)
-
-### Downloads
-
-$$MACOS_EMOJI **macOS**
-- Apple Silicon (M1/M2/M3) - .dmg
-- Intel (x64) - .dmg
-
-$$WINDOWS_EMOJI **Windows** (x64) - .exe
-
-$$LINUX_EMOJI **Linux** (x64) - .deb
-
-### Installation
-
-**macOS:**
-\`\`\`bash
-# Download .dmg, open and drag to Applications
-\`\`\`
-
-**Windows:**
-\`\`\`powershell
-# Download and run .exe installer
-\`\`\`
-
-**Linux:**
-\`\`\`bash
-# Download and install .deb
-sudo apt install ./pico-export-desktop_*.deb
-\`\`\`
-
----
-
-*Built with ❤️ using Tauri + React*
-EOF
+	printf '%s\n' "## Pico Export Desktop $(VERSION_TAG)" ""; \
+	printf '%s\n' "### Downloads" ""; \
+	printf '%s\n' "$$MACOS_EMOJI **macOS**" "- Apple Silicon (M1/M2/M3) - .dmg" "- Intel (x64) - .dmg" ""; \
+	printf '%s\n' "$$WINDOWS_EMOJI **Windows** (x64) - .exe" ""; \
+	printf '%s\n' "$$LINUX_EMOJI **Linux** (x64) - .deb" ""; \
+	printf '%s\n' "### Installation" ""; \
+	printf '%s\n' "**macOS:**" '```bash' '# Download .dmg, open and drag to Applications' '```' ""; \
+	printf '%s\n' "**Windows:**" '```powershell' '# Download and run .exe installer' '```' ""; \
+	printf '%s\n' "**Linux:**" '```bash' '# Download and install .deb' 'sudo apt install ./pico-export-desktop_*.deb' '```' ""; \
+	printf '%s\n' "---" "" "*Built with ❤️ using Tauri + React*"
