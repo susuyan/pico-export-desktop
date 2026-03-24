@@ -1,0 +1,70 @@
+name: Cache Warmup
+
+on:
+  schedule:
+    # 每周一凌晨 3 点预热缓存
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - 'package.json'
+      - 'src-tauri/Cargo.toml'
+      - '.github/actions/**'
+
+permissions:
+  contents: read
+
+jobs:
+  warmup-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup macOS Tauri build deps
+        uses: ./.github/actions/setup-macos-tauri
+
+      - name: Warmup build cache
+        run: |
+          echo "✅ macOS cache warmed up"
+          echo "📦 Cache populated for:"
+          echo "   - Node.js modules"
+          echo "   - Cargo registry"
+          echo "   - Tauri CLI"
+          echo "   - Build artifacts"
+
+  warmup-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Windows Tauri build deps
+        uses: ./.github/actions/setup-windows-tauri
+
+      - name: Warmup build cache
+        run: |
+          Write-Host "✅ Windows cache warmed up"
+          Write-Host "📦 Cache populated for:"
+          Write-Host "   - Node.js modules"
+          Write-Host "   - Cargo registry"
+          Write-Host "   - Tauri CLI"
+          Write-Host "   - Build artifacts"
+
+  warmup-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Linux Tauri build deps
+        uses: ./.github/actions/setup-linux-tauri
+
+      - name: Warmup build cache
+        run: |
+          echo "✅ Linux cache warmed up"
+          echo "📦 Cache populated for:"
+          echo "   - Node.js modules"
+          echo "   - Cargo registry"
+          echo "   - Tauri CLI"
+          echo "   - APT packages"
+          echo "   - Build artifacts"
