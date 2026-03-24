@@ -4,60 +4,16 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (e.g., 0.0.5)'
-        required: true
-        type: string
 
 permissions:
   contents: write
 
 jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    outputs:
-      release_id: ${{ steps.create-release.outputs.id }}
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Determine version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="v${{ github.event.inputs.version }}"
-          else
-            VERSION="${{ github.ref_name }}"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "📦 Release version: $VERSION"
-
-      - name: Create Release
-        id: create-release
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { data } = await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: '${{ steps.version.outputs.version }}',
-              name: 'Pico Export Desktop ${{ steps.version.outputs.version }}',
-              body: '🚀 Building release assets...',
-              draft: true,
-              prerelease: false
-            });
-            core.setOutput('id', data.id);
-
   build-macos:
-    needs: create-release
     runs-on: macos-latest
     strategy:
       matrix:
-        include:
-          - target: aarch64-apple-darwin
-          - target: x86_64-apple-darwin
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-macos-tauri
@@ -85,11 +41,14 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          releaseId: ${{ needs.create-release.outputs.release_id }}
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Pico Export Desktop ${{ github.ref_name }}'
+          releaseBody: 'See the assets to download this version.'
+          releaseDraft: true
+          prerelease: false
           args: --target ${{ matrix.target }}
 
   build-windows:
-    needs: create-release
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,10 +57,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          releaseId: ${{ needs.create-release.outputs.release_id }}
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Pico Export Desktop ${{ github.ref_name }}'
+          releaseBody: 'See the assets to download this version.'
+          releaseDraft: true
+          prerelease: false
 
   build-linux:
-    needs: create-release
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -110,33 +72,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          releaseId: ${{ needs.create-release.outputs.release_id }}
-
-  finalize:
-    needs: [create-release, build-macos, build-windows, build-linux]
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - uses: actions/github-script@v7
-        with:
-          script: |
-            const results = {
-              macos: '${{ needs.build-macos.result }}',
-              windows: '${{ needs.build-windows.result }}',
-              linux: '${{ needs.build-linux.result }}'
-            };
-            const body = `## Pico Export Desktop ${{ needs.create-release.outputs.version }}
-
-**Build Status:**
-- macOS (Apple Silicon + Intel): ${results.macos === 'success' ? '✅' : '❌'}
-- Windows: ${results.windows === 'success' ? '✅' : '❌'}
-- Linux: ${results.linux === 'success' ? '✅' : '❌'}
-
-Download platform-specific assets below.`;
-
-            await github.rest.repos.updateRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: ${{ needs.create-release.outputs.release_id }},
-              body: body
-            });
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Pico Export Desktop ${{ github.ref_name }}'
+          releaseBody: 'See the assets to download this version.'
+          releaseDraft: true
+          prerelease: false
