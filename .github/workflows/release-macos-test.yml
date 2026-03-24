@@ -9,6 +9,9 @@ permissions:
 jobs:
   build-macos:
     runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: ./src-tauri
     steps:
       - uses: actions/checkout@v4
 
@@ -17,16 +20,17 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
-
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          rustflags: ""
+          cache-dependency-path: './package-lock.json'
 
       - name: Install dependencies
         run: npm ci
+        working-directory: ${{ github.workspace }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Import Certificate
+        working-directory: ${{ github.workspace }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -50,9 +54,9 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
+          projectPath: ./src-tauri
           tagName: v0.0.5-test
           releaseName: 'Test Release v0.0.5'
           releaseBody: 'Test build'
           releaseDraft: true
           prerelease: true
-          includeDebug: true
