@@ -118,11 +118,8 @@ async fn start_download(
     let checkpoint_manager = Arc::clone(&state.checkpoint_manager);
 
     // 创建下载管理器
-    let mut download_manager = match DownloadManager::new(
-        config,
-        download_path,
-        checkpoint_manager,
-    ) {
+    let mut download_manager = match DownloadManager::new(config, download_path, checkpoint_manager)
+    {
         Ok(manager) => manager,
         Err(e) => {
             tracing::error!("Failed to create download manager: {}", e);
@@ -174,10 +171,7 @@ async fn start_download(
             }
             Err(e) => {
                 tracing::error!("Download failed: {}", e);
-                let _ = window_for_download.emit(
-                    "download:error",
-                    format!("下载失败: {}", e),
-                );
+                let _ = window_for_download.emit("download:error", format!("下载失败: {}", e));
             }
         }
     });
@@ -231,12 +225,11 @@ async fn retry_failed(
     let checkpoint = {
         let manager = &state.checkpoint_manager;
         match manager.list_all() {
-            Ok(checkpoints) => {
-                checkpoints.into_iter()
-                    .filter(|c| !c.failed_tasks.is_empty())
-                    .max_by_key(|c| c.timestamp)
-            }
-            Err(_) => None
+            Ok(checkpoints) => checkpoints
+                .into_iter()
+                .filter(|c| !c.failed_tasks.is_empty())
+                .max_by_key(|c| c.timestamp),
+            Err(_) => None,
         }
     };
 
@@ -287,8 +280,8 @@ fn main() {
         .join("checkpoints");
 
     // 创建检查点管理器
-    let checkpoint_manager = CheckpointManager::new(&checkpoint_path)
-        .expect("Failed to create checkpoint manager");
+    let checkpoint_manager =
+        CheckpointManager::new(&checkpoint_path).expect("Failed to create checkpoint manager");
 
     // 清理过期检查点
     if let Ok(count) = checkpoint_manager.cleanup_expired() {
@@ -298,6 +291,7 @@ fn main() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_cli::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())

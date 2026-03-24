@@ -36,6 +36,18 @@ pub fn get_obsutil_path() -> Option<String> {
                 if let Some(path) = embedded_path {
                     return path.to_str().map(|s| s.to_string());
                 }
+
+                // 开发模式：从 target/debug 或 target/release 向上找到项目根目录
+                // 检查 src-tauri/Resources/bin/obsutil
+                let dev_path = exe_dir
+                    .parent() // target
+                    .and_then(|p| p.parent()) // project root
+                    .map(|p| p.join(format!("src-tauri/Resources/bin/{}", OBSUTIL_NAME)))
+                    .filter(|p| p.exists());
+
+                if let Some(path) = dev_path {
+                    return path.to_str().map(|s| s.to_string());
+                }
             }
 
             // Windows/Linux: 检查 Resources/bin 目录
@@ -44,6 +56,17 @@ pub fn get_obsutil_path() -> Option<String> {
                 let resources_path = exe_dir.join(format!("Resources/bin/{}", OBSUTIL_NAME));
                 if resources_path.exists() {
                     return resources_path.to_str().map(|s| s.to_string());
+                }
+
+                // 开发模式：检查 src-tauri/Resources/bin/
+                let dev_path = exe_dir
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .map(|p| p.join(format!("src-tauri/Resources/bin/{}", OBSUTIL_NAME)))
+                    .filter(|p| p.exists());
+
+                if let Some(path) = dev_path {
+                    return path.to_str().map(|s| s.to_string());
                 }
             }
 
@@ -175,7 +198,9 @@ pub async fn download_with_obsutil(
     })?;
 
     // 提取 object key
-    let object_key = task.source.trim_start_matches(&format!("obs://{}/", bucket));
+    let object_key = task
+        .source
+        .trim_start_matches(&format!("obs://{}/", bucket));
     let source_url = format!("obs://{}/{}", bucket, object_key);
 
     tracing::info!(
@@ -218,7 +243,7 @@ pub async fn download_with_obsutil(
                 ))
             }
         }
-        Err(e) => Err(anyhow!("obsutil 执行失败: {}", e))
+        Err(e) => Err(anyhow!("obsutil 执行失败: {}", e)),
     }
 }
 
@@ -241,13 +266,8 @@ pub async fn batch_download_with_obsutil(
 }
 
 /// 使用 obsutil 配置 ak/sk（永久配置）
-pub async fn obsutil_config(
-    auth: &AuthInfo,
-    endpoint: &str,
-) -> Result<()> {
-    let obsutil_path = get_obsutil_path().ok_or_else(|| {
-        anyhow!("obsutil 未找到")
-    })?;
+pub async fn obsutil_config(auth: &AuthInfo, endpoint: &str) -> Result<()> {
+    let obsutil_path = get_obsutil_path().ok_or_else(|| anyhow!("obsutil 未找到"))?;
 
     let output = Command::new(&obsutil_path)
         .args(&[

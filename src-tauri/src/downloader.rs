@@ -1,7 +1,7 @@
+use crate::checkpoint::{CheckpointData, CheckpointManager};
 use crate::config::{AuthInfo, DownloadConfig, DownloadTask};
 use crate::obs_client::{check_obsutil, download_with_obsutil};
 use crate::scheduler::{Batch, TaskScheduler};
-use crate::checkpoint::{CheckpointData, CheckpointManager};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -178,13 +178,8 @@ impl DownloadManager {
             }
 
             // 发送进度更新
-            self.send_progress(
-                success_count,
-                failed_count,
-                idx,
-                total_batches,
-                batch,
-            ).await;
+            self.send_progress(success_count, failed_count, idx, total_batches, batch)
+                .await;
 
             // 批次间停顿
             if idx < total_batches - 1 {
@@ -215,23 +210,33 @@ impl DownloadManager {
     /// 发送初始进度
     async fn send_initial_progress(&self, total_files: usize, total_batches: usize) {
         if let Some(ref tx) = self.progress_tx {
-            let file_progress: Vec<FileProgress> = self.config.tasks.iter().map(|task| {
-                let status = if self.checkpoint.completed_tasks.contains(&task.id) {
-                    FileStatus::Completed
-                } else if self.checkpoint.failed_tasks.contains(&task.id) {
-                    FileStatus::Failed("Download failed".to_string())
-                } else {
-                    FileStatus::Pending
-                };
+            let file_progress: Vec<FileProgress> = self
+                .config
+                .tasks
+                .iter()
+                .map(|task| {
+                    let status = if self.checkpoint.completed_tasks.contains(&task.id) {
+                        FileStatus::Completed
+                    } else if self.checkpoint.failed_tasks.contains(&task.id) {
+                        FileStatus::Failed("Download failed".to_string())
+                    } else {
+                        FileStatus::Pending
+                    };
 
-                FileProgress {
-                    task_id: task.id.clone(),
-                    filename: task.target.split('/').last().unwrap_or(&task.target).to_string(),
-                    status,
-                    progress: 0.0,
-                    speed: None,
-                }
-            }).collect();
+                    FileProgress {
+                        task_id: task.id.clone(),
+                        filename: task
+                            .target
+                            .split('/')
+                            .last()
+                            .unwrap_or(&task.target)
+                            .to_string(),
+                        status,
+                        progress: 0.0,
+                        speed: None,
+                    }
+                })
+                .collect();
 
             let batch_info = BatchInfo {
                 batch_index: 0,
@@ -275,29 +280,41 @@ impl DownloadManager {
                 0.0
             };
 
-            let file_progress: Vec<FileProgress> = self.config.tasks.iter().map(|task| {
-                let is_completed = self.checkpoint.completed_tasks.contains(&task.id);
-                let is_failed = self.checkpoint.failed_tasks.contains(&task.id);
+            let file_progress: Vec<FileProgress> = self
+                .config
+                .tasks
+                .iter()
+                .map(|task| {
+                    let is_completed = self.checkpoint.completed_tasks.contains(&task.id);
+                    let is_failed = self.checkpoint.failed_tasks.contains(&task.id);
 
-                let (status, progress) = if is_completed {
-                    (FileStatus::Completed, 100.0)
-                } else if is_failed {
-                    (FileStatus::Failed("Download failed".to_string()), 0.0)
-                } else {
-                    (FileStatus::Pending, 0.0)
-                };
+                    let (status, progress) = if is_completed {
+                        (FileStatus::Completed, 100.0)
+                    } else if is_failed {
+                        (FileStatus::Failed("Download failed".to_string()), 0.0)
+                    } else {
+                        (FileStatus::Pending, 0.0)
+                    };
 
-                FileProgress {
-                    task_id: task.id.clone(),
-                    filename: task.target.split('/').last().unwrap_or(&task.target).to_string(),
-                    status,
-                    progress,
-                    speed: None,
-                }
-            }).collect();
+                    FileProgress {
+                        task_id: task.id.clone(),
+                        filename: task
+                            .target
+                            .split('/')
+                            .last()
+                            .unwrap_or(&task.target)
+                            .to_string(),
+                        status,
+                        progress,
+                        speed: None,
+                    }
+                })
+                .collect();
 
             // 计算当前批次已完成数量
-            let completed_in_batch = current_batch.tasks.iter()
+            let completed_in_batch = current_batch
+                .tasks
+                .iter()
                 .filter(|t| self.checkpoint.completed_tasks.contains(&t.id))
                 .count();
 
@@ -319,7 +336,11 @@ impl DownloadManager {
                 overall_progress,
                 speed: 0,
                 remaining_time: 0,
-                status: if self.running.load(Ordering::SeqCst) { "downloading".to_string() } else { "paused".to_string() },
+                status: if self.running.load(Ordering::SeqCst) {
+                    "downloading".to_string()
+                } else {
+                    "paused".to_string()
+                },
             };
 
             let _ = tx.send(progress).await;
@@ -364,7 +385,8 @@ impl DownloadManager {
                     &endpoint,
                     &bucket,
                     3, // 重试 3 次
-                ).await;
+                )
+                .await;
 
                 match result {
                     Ok(_) => (task.id.clone(), true, None),

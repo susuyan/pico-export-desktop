@@ -227,6 +227,9 @@ mod tests {
         let restored = CheckpointData::from_json(&json).unwrap();
 
         assert_eq!(restored.export_id, checkpoint.export_id);
-        assert_eq!(restored.completed_tasks.len(), checkpoint.completed_tasks.len());
+        assert_eq!(
+            restored.completed_tasks.len(),
+            checkpoint.completed_tasks.len()
+        );
     }
 }

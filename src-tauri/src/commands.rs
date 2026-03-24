@@ -80,7 +80,12 @@ pub async fn install_obsutil() -> anyhow::Result<String> {
     if filename.ends_with(".tar.gz") {
         // 使用 tar 解压
         let output = Command::new("tar")
-            .args(&["-xzf", archive_path.to_str().unwrap(), "-C", install_dir.to_str().unwrap()])
+            .args(&[
+                "-xzf",
+                archive_path.to_str().unwrap(),
+                "-C",
+                install_dir.to_str().unwrap(),
+            ])
             .output()?;
 
         if !output.status.success() {
@@ -89,7 +94,12 @@ pub async fn install_obsutil() -> anyhow::Result<String> {
     } else if filename.ends_with(".zip") {
         // 使用 unzip 解压
         let output = Command::new("unzip")
-            .args(&["-o", archive_path.to_str().unwrap(), "-d", install_dir.to_str().unwrap()])
+            .args(&[
+                "-o",
+                archive_path.to_str().unwrap(),
+                "-d",
+                install_dir.to_str().unwrap(),
+            ])
             .output()?;
 
         if !output.status.success() {
@@ -121,5 +131,7 @@ fn find_obsutil_binary(dir: &std::path::Path) -> anyhow::Result<String> {
         }
     }
 
-    Err(anyhow::anyhow!("obsutil binary not found in extracted archive"))
+    Err(anyhow::anyhow!(
+        "obsutil binary not found in extracted archive"
+    ))
 }

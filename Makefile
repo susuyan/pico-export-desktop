@@ -17,7 +17,11 @@ VERSION ?=
 BUILD ?=
 
 # Signing configuration (auto-detected if not set)
+# Priority: Developer ID Application > Apple Distribution
 SIGNING_IDENTITY ?= $(shell security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/ {print $$2; exit}')
+ifndef SIGNING_IDENTITY
+SIGNING_IDENTITY := $(shell security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Distribution/ {print $$2; exit}')
+endif
 TEAM_ID ?= $(shell echo "$(SIGNING_IDENTITY)" | grep -oE '\([A-Z0-9]{10}\)$$' | tr -d '()' 2>/dev/null)
 
 # Default target
