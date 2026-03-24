@@ -166,10 +166,17 @@ bump-version:  # Bump version (usage: make bump-version VERSION=0.0.2)
 	git tag -s "v$(VERSION)" -m "v$(VERSION)" 2>/dev/null || git tag "v$(VERSION)" -m "v$(VERSION)"; \
 	echo "✅ Version bumped to $(VERSION), tagged v$(VERSION)"
 
-bump-and-release: bump-version  # Bump version and push to trigger GitHub Actions release
+release: bump-version  # Bump version and trigger GitHub Actions release
 	@git push --no-verify; \
 	git push --tags --no-verify; \
-	echo "🚀 Pushed v$(VERSION) - GitHub Actions will build and release"
+	echo ""; \
+	echo "🚀 Release v$(VERSION) triggered!"; \
+	echo ""; \
+	echo "📊 Monitor build progress:"; \
+	echo "   gh run list -R $(shell git remote get-url origin | sed 's/.*github\.com[:/]\(.*\)\.git/\1/')"; \
+	echo ""; \
+	echo "🔗 Release will be available at:"; \
+	echo "   https://github.com/$(shell git remote get-url origin | sed 's/.*github\.com[:/]\(.*\)\.git/\1/')/releases"
 
 release-local: clean build sign-local notarize  # Complete local release: build + sign + notarize
 	echo "🎉 Local release complete!"
