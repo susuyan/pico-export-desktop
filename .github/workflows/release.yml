@@ -57,13 +57,6 @@ jobs:
   build-macos:
     needs: create-release
     runs-on: macos-latest
-    strategy:
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            name: Apple Silicon
-          - target: x86_64-apple-darwin
-            name: Intel
     steps:
       - uses: actions/checkout@v4
 
@@ -71,7 +64,7 @@ jobs:
         uses: ./.github/actions/setup-tauri
         with:
           platform: macos-latest
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-darwin
 
       - name: Import Certificate
         env:
@@ -105,7 +98,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: --target ${{ matrix.target }}
+          args: --target aarch64-apple-darwin
 
   build-windows:
     needs: create-release

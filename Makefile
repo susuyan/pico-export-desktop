@@ -257,13 +257,18 @@ ci-release-notes:
 	@MACOS_EMOJI=$$([ "$(MACOS_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
 	WINDOWS_EMOJI=$$([ "$(WINDOWS_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
 	LINUX_EMOJI=$$([ "$(LINUX_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
-	printf '%s\n' "## Pico Export Desktop $(VERSION_TAG)" ""; \
-	printf '%s\n' "### Downloads" ""; \
-	printf '%s\n' "$$MACOS_EMOJI **macOS**" "- Apple Silicon (M1/M2/M3) - .dmg" "- Intel (x64) - .dmg" ""; \
-	printf '%s\n' "$$WINDOWS_EMOJI **Windows** (x64) - .exe" ""; \
-	printf '%s\n' "$$LINUX_EMOJI **Linux** (x64) - .deb" ""; \
-	printf '%s\n' "### Installation" ""; \
-	printf '%s\n' "**macOS:**" '```bash' '# Download .dmg, open and drag to Applications' '```' ""; \
-	printf '%s\n' "**Windows:**" '```powershell' '# Download and run .exe installer' '```' ""; \
-	printf '%s\n' "**Linux:**" '```bash' '# Download and install .deb' 'sudo apt install ./pico-export-desktop_*.deb' '```' ""; \
-	printf '%s\n' "---" "" "*Built with ❤️ using Tauri + React*"
+	printf '%s\n' "## Downloads" ""; \
+	printf '%s\n' "| Platform | Architecture | File |"; \
+	printf '%s\n' "|----------|-------------|------|"; \
+	printf '%s\n' "| $$MACOS_EMOJI macOS | Apple Silicon (M1/M2/M3) | Pico.Export.Desktop_*_aarch64.dmg |"; \
+	printf '%s\n' "| $$WINDOWS_EMOJI Windows | x64 | Pico.Export.Desktop_*_x64-setup.exe |"; \
+	printf '%s\n' "| $$LINUX_EMOJI Linux | x64 | Pico.Export.Desktop_*_amd64.deb |"; \
+	printf '%s\n' "" "---" ""; \
+	printf '%s\n' "## Installation" ""; \
+	printf '%s\n' "### macOS" ""; \
+	printf '%s\n' '```bash' '# Download .dmg, open and drag to Applications' '```' ""; \
+	printf '%s\n' "### Windows" ""; \
+	printf '%s\n' '```powershell' '# Download and run .exe installer' '```' ""; \
+	printf '%s\n' "### Linux" ""; \
+	printf '%s\n' '```bash' '# Download and install .deb' 'sudo apt install ./pico-export-desktop_*.deb' '```' ""; \
+	printf '%s\n' "---" "" "*Built with Tauri + React*"
