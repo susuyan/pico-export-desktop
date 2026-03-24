@@ -48,7 +48,7 @@ jobs:
               draft: true,
               prerelease: false
             });
-            core.setOutput('id', data.id);
+            core.setOutput('result', data.id);
 
   build-macos:
     needs: create-release
