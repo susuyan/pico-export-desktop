@@ -163,20 +163,19 @@ jobs:
 
       - name: Update Release
         uses: actions/github-script@v7
-        env:
-          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
         with:
           script: |
             const fs = require('fs');
             const body = fs.readFileSync('release_notes.txt', 'utf8');
-            const releaseId = process.env.RELEASE_ID;
-            if (!releaseId) {
-              core.setFailed('Release ID not found');
-              return;
-            }
+            const tag = '${{ needs.create-release.outputs.version }}';
+            const { data: release } = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: tag
+            });
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              release_id: parseInt(releaseId),
+              release_id: release.id,
               body: body
             });
