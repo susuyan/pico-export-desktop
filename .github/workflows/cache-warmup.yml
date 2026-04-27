@@ -47,21 +47,3 @@ jobs:
           Write-Host "   - Cargo registry"
           Write-Host "   - Tauri CLI"
           Write-Host "   - Build artifacts"
-
-  warmup-linux:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Linux Tauri build deps
-        uses: ./.github/actions/setup-linux-tauri
-
-      - name: Warmup build cache
-        run: |
-          echo "✅ Linux cache warmed up"
-          echo "📦 Cache populated for:"
-          echo "   - Node.js modules"
-          echo "   - Cargo registry"
-          echo "   - Tauri CLI"
-          echo "   - APT packages"
-          echo "   - Build artifacts"

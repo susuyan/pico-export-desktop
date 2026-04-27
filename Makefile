@@ -32,7 +32,7 @@ KEYCHAIN_PASSWORD ?=
 # Default target
 .DEFAULT_GOAL := help
 .PHONY: help dev build build-ci sign sign-verify notarize install-dev install-release \
-        bump-version release release-local clean ci-build-macos ci-build-linux ci-build-windows \
+        bump-version release release-local clean ci-build-macos ci-build-windows \
         ci-import-cert ci-release-notes
 
 # =============================================================================
@@ -240,35 +240,25 @@ ci-build-windows:
 	@echo "🔨 CI build for Windows..."
 	cd $(TAURI_DIR) && cargo tauri build
 
-# CI 使用的 Linux 构建目标
-ci-build-linux:
-	@echo "🔨 CI build for Linux..."
-	cd $(TAURI_DIR) && cargo tauri build
-
 # 生成 Release Notes（供 GitHub Actions 使用）
-# 用法: make ci-release-notes VERSION_TAG=v0.0.8 MACOS_STATUS=success WINDOWS_STATUS=success LINUX_STATUS=failure
+# 用法: make ci-release-notes VERSION_TAG=v0.0.8 MACOS_STATUS=success WINDOWS_STATUS=success
 VERSION_TAG ?= v0.0.0
 MACOS_STATUS ?= unknown
 WINDOWS_STATUS ?= unknown
-LINUX_STATUS ?= unknown
 
 .PHONY: ci-release-notes
 ci-release-notes:
 	@MACOS_EMOJI=$$([ "$(MACOS_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
 	WINDOWS_EMOJI=$$([ "$(WINDOWS_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
-	LINUX_EMOJI=$$([ "$(LINUX_STATUS)" = "success" ] && echo "✅" || echo "❌"); \
 	printf '%s\n' "## Downloads" ""; \
 	printf '%s\n' "| Platform | Architecture | File |"; \
 	printf '%s\n' "|----------|-------------|------|"; \
 	printf '%s\n' "| $$MACOS_EMOJI macOS | Apple Silicon (M1/M2/M3) | Pico.Export.Desktop_*_aarch64.dmg |"; \
 	printf '%s\n' "| $$WINDOWS_EMOJI Windows | x64 | Pico.Export.Desktop_*_x64-setup.exe |"; \
-	printf '%s\n' "| $$LINUX_EMOJI Linux | x64 | Pico.Export.Desktop_*_amd64.deb |"; \
 	printf '%s\n' "" "---" ""; \
 	printf '%s\n' "## Installation" ""; \
 	printf '%s\n' "### macOS" ""; \
 	printf '%s\n' '```bash' '# Download .dmg, open and drag to Applications' '```' ""; \
 	printf '%s\n' "### Windows" ""; \
-	printf '%s\n' '```powershell' '# Download and run .exe installer' '```' ""; \
-	printf '%s\n' "### Linux" ""; \
-	printf '%s\n' '```bash' '# Download and install .deb' 'sudo apt install ./pico-export-desktop_*.deb' '```' ""; \
+	printf '%s\n' '```powershell' '# Download and run .exe installer (unsigned - requires manual confirmation)' '```' ""; \
 	printf '%s\n' "---" "" "*Built with Tauri + React*"
