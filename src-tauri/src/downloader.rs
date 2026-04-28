@@ -1,6 +1,6 @@
 use crate::checkpoint::{CheckpointData, CheckpointManager};
 use crate::config::{AuthInfo, DownloadConfig, DownloadTask};
-use crate::obs_client::{check_obsutil, download_with_obsutil};
+use crate::obs_client::{check_obsutil_installed, download_with_obsutil};
 use crate::scheduler::{Batch, TaskScheduler};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -90,7 +90,7 @@ impl DownloadManager {
             .unwrap_or_else(|| CheckpointData::new(config.export_id.clone(), config.clone()));
 
         // 检查 obsutil 是否可用
-        if !check_obsutil() {
+        if !check_obsutil_installed() {
             return Err(anyhow::anyhow!(
                 "obsutil 未安装。请先安装 obsutil:\n\
                  1. 从 https://support.huaweicloud.com/utiltg-obs/obsutil_03_0001.html 下载\n\
