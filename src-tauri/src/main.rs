@@ -269,6 +269,17 @@ async fn check_obsutil_status() -> Result<IpcResponse<serde_json::Value>, String
     })))
 }
 
+// 一键安装 obsutil
+#[tauri::command]
+async fn install_obsutil() -> Result<IpcResponse<()>, String> {
+    use crate::obs_client::install_obsutil;
+
+    match install_obsutil().await {
+        Ok(_) => Ok(IpcResponse::success(())),
+        Err(e) => Ok(IpcResponse::error(format!("安装失败: {}", e))),
+    }
+}
+
 // 打开目录
 #[tauri::command]
 async fn open_directory(path: String) -> Result<(), String> {
@@ -344,6 +355,7 @@ fn main() {
             open_directory,
             retry_failed,
             check_obsutil_status,
+            install_obsutil,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

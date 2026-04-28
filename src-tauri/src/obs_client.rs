@@ -113,10 +113,110 @@ pub fn get_install_dir() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("pico-export-desktop").join("bin"))
 }
 
+/// 自动安装 obsutil
+pub async fn install_obsutil() -> Result<()> {
+    let install_dir = get_install_dir()
+        .ok_or_else(|| anyhow!("无法获取安装目录"))?;
+
+    // 创建安装目录
+    std::fs::create_dir_all(&install_dir)?;
+
+    let download_url = get_obsutil_download_url();
+    if download_url.is_empty() {
+        return Err(anyhow!("不支持的平台"));
+    }
+
+    tracing::info!("开始下载 obsutil: {}", download_url);
+
+    // 创建专用临时目录（避免冲突）
+    let temp_base = std::env::temp_dir();
+    let temp_dir = temp_base.join("pico-export-desktop-install");
+    std::fs::create_dir_all(&temp_dir)?;
+
+    let download_file = temp_dir.join("obsutil.tar.gz");
+
+    // 使用 curl 下载（macOS/Linux）
+    #[cfg(not(target_os = "windows"))]
+    {
+        let output = Command::new("curl")
+            .args(["-L", "-o", download_file.to_str().unwrap(), &download_url])
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            return Err(anyhow!("下载失败: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+    }
+
+    tracing::info!("下载完成，开始解压...");
+
+    // 解压文件
+    #[cfg(not(target_os = "windows"))]
+    {
+        // macOS/Linux: 使用 tar 解压到专用目录
+        let output = Command::new("tar")
+            .args(["-xzf", download_file.to_str().unwrap(), "-C", temp_dir.to_str().unwrap()])
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            return Err(anyhow!("解压失败: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+
+        tracing::info!("解压完成，查找 obsutil 文件...");
+
+        // 查找解压后的 obsutil 文件
+        let find_output = Command::new("find")
+            .args([temp_dir.to_str().unwrap(), "-name", "obsutil", "-type", "f"])
+            .output()
+            .await?;
+
+        if !find_output.status.success() {
+            return Err(anyhow!("查找 obsutil 失败"));
+        }
+
+        let obsutil_path_str = String::from_utf8_lossy(&find_output.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        if obsutil_path_str.is_empty() {
+            return Err(anyhow!("找不到解压后的 obsutil 文件"));
+        }
+
+        tracing::info!("找到 obsutil: {}", obsutil_path_str);
+
+        // 复制到安装目录
+        let obsutil_path = PathBuf::from(&obsutil_path_str);
+        let target_path = install_dir.join(OBSUTIL_NAME);
+        std::fs::copy(&obsutil_path, &target_path)?;
+
+        // 设置执行权限
+        let chmod_output = Command::new("chmod")
+            .args(["+x", target_path.to_str().unwrap()])
+            .output()
+            .await?;
+
+        if !chmod_output.status.success() {
+            return Err(anyhow!("设置权限失败: {}", String::from_utf8_lossy(&chmod_output.stderr)));
+        }
+
+        tracing::info!("安装完成: {}", target_path.display());
+
+        // 清理临时目录
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    Ok(())
+}
+
 /// 获取 obsutil 下载 URL（根据平台）
 pub fn get_obsutil_download_url() -> String {
     #[cfg(target_os = "macos")]
     {
+        // macOS: 使用 amd64 版本（可通过 Rosetta 2 在 M1/M2/M3 上运行）
         "https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_darwin_amd64.tar.gz".to_string()
     }
 

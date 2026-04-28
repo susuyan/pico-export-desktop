@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { X, FolderOpen, RotateCcw, Save, Download, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react'
+import { X, FolderOpen, RotateCcw, Save, Download, CheckCircle, AlertCircle, Loader } from 'lucide-react'
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -22,6 +22,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const settings = useSettingsStore()
   const { setDownloadDir } = useDownloadStore()
   const [obsutilStatus, setObsutilStatus] = useState<ObsutilStatus | null>(null)
+  const [installing, setInstalling] = useState(false)
 
   // 同步设置中的下载目录到下载 store
   useEffect(() => {
@@ -64,12 +65,26 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     }
   }, [obsutilStatus])
 
-  const handleOpenDownloadUrl = useCallback(() => {
-    if (obsutilStatus?.download_url) {
-      // 在新窗口打开下载链接
-      window.open(obsutilStatus.download_url, '_blank')
+  const handleInstallObsutil = useCallback(async () => {
+    setInstalling(true)
+    try {
+      const res = await invoke<IpcResponse<void>>('install_obsutil')
+      if (res.success) {
+        // 重新检查状态
+        const statusRes = await invoke<IpcResponse<ObsutilStatus>>('check_obsutil_status')
+        if (statusRes.success && statusRes.data) {
+          setObsutilStatus(statusRes.data)
+        }
+      } else {
+        alert(res.error || '安装失败')
+      }
+    } catch (err) {
+      console.error('Install failed:', err)
+      alert('安装失败: ' + err)
+    } finally {
+      setInstalling(false)
     }
-  }, [obsutilStatus])
+  }, [])
 
   const handleReset = () => {
     if (confirm('确定要重置所有设置为默认值吗？')) {
@@ -105,7 +120,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
               命令行工具 (obsutil)
             </h3>
 
-            <div className="p-4 bg-gray-50 rounded-lg space-y-3">
+            <div className="p-4 bg-gray-50 rounded-lg space-y-4">
               {/* 安装状态 */}
               <div className="flex items-center gap-3">
                 <div className="flex-shrink-0">
@@ -126,7 +141,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
               </div>
 
               {/* 安装目录 */}
-              {obsutilStatus && (
+              {obsutilStatus?.installed && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     安装目录
@@ -149,27 +164,25 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                 </div>
               )}
 
-              {/* 安装指引 */}
-              {!obsutilStatus?.installed && obsutilStatus?.download_url && (
-                <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
-                  <div className="text-sm font-medium text-blue-900 mb-2">
-                    安装步骤：
-                  </div>
-                  <ol className="text-xs text-blue-800 space-y-1 list-decimal list-inside">
-                    <li>点击下方按钮下载 obsutil 压缩包</li>
-                    <li>解压后将 obsutil 可执行文件放入上述安装目录</li>
-                    <li>macOS 用户需执行: <code className="bg-blue-100 px-1 rounded">chmod +x obsutil</code></li>
-                    <li>重启应用即可使用</li>
-                  </ol>
-                  <button
-                    onClick={handleOpenDownloadUrl}
-                    className="mt-3 flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors w-full justify-center"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>下载 obsutil</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </button>
-                </div>
+              {/* 一键安装按钮 */}
+              {!obsutilStatus?.installed && (
+                <button
+                  onClick={handleInstallObsutil}
+                  disabled={installing}
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {installing ? (
+                    <>
+                      <Loader className="w-5 h-5 animate-spin" />
+                      <span>正在安装...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-5 h-5" />
+                      <span>一键安装 obsutil</span>
+                    </>
+                  )}
+                </button>
               )}
 
               {/* 已安装提示 */}
