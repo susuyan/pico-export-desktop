@@ -306,9 +306,22 @@ fn main() {
         .join("pico-export-desktop")
         .join("checkpoints");
 
+    // 确保父目录存在
+    if let Err(e) = std::fs::create_dir_all(&checkpoint_path) {
+        tracing::error!("Failed to create checkpoint directory: {}", e);
+        eprintln!("无法创建检查点存储目录: {}\n路径: {}", e, checkpoint_path.display());
+        return;
+    }
+
     // 创建检查点管理器
-    let checkpoint_manager =
-        CheckpointManager::new(&checkpoint_path).expect("Failed to create checkpoint manager");
+    let checkpoint_manager = match CheckpointManager::new(&checkpoint_path) {
+        Ok(manager) => manager,
+        Err(e) => {
+            tracing::error!("Failed to create checkpoint manager: {}", e);
+            eprintln!("无法创建检查点管理器: {}\n路径: {}", e, checkpoint_path.display());
+            return;
+        }
+    };
 
     // 清理过期检查点
     if let Ok(count) = checkpoint_manager.cleanup_expired() {
