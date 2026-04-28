@@ -56,7 +56,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["Resources/**/*"],
+    "resources": ["./bin/**/*"],
     "macOS": {
       "entitlements": "entitlements.plist",
       "exceptionDomain": "",
