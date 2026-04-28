@@ -323,18 +323,6 @@ fn main() {
         }
     };
 
-    // 延迟清理过期检查点，避免启动时与 sled 后台线程冲突
-    let checkpoint_manager_for_cleanup = Arc::clone(&checkpoint_manager);
-    tokio::spawn(async move {
-        // 等待 10 秒后再清理，确保 sled 后台线程稳定运行
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-        if let Ok(count) = checkpoint_manager_for_cleanup.cleanup_expired() {
-            if count > 0 {
-                tracing::info!("Cleaned up {} expired checkpoints", count);
-            }
-        }
-    });
-
     tauri::Builder::default()
         .plugin(tauri_plugin_cli::init())
         .plugin(tauri_plugin_dialog::init())
