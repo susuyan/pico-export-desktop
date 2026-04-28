@@ -172,6 +172,7 @@ bump-version:  # Bump version (usage: make bump-version VERSION=0.0.8)
 	\
 	CARGO_FILE="$(TAURI_DIR)/Cargo.toml"; \
 	PACKAGE_FILE="$(CURRENT_MAKEFILE_DIR)/package.json"; \
+	TAURI_CONFIG="$(TAURI_DIR)/tauri.conf.json"; \
 	\
 	echo "🔢 Bumping version to $(VERSION)..."; \
 	\
@@ -181,6 +182,11 @@ bump-version:  # Bump version (usage: make bump-version VERSION=0.0.8)
 	# Update package.json \
 	if [ -f "$$PACKAGE_FILE" ]; then \
 		npm version "$(VERSION)" --no-git-tag-version; \
+	fi; \
+	\
+	# Update tauri.conf.json \
+	if [ -f "$$TAURI_CONFIG" ]; then \
+		sed -i '' 's/"version": "[0-9]*\.[0-9]*\.[0-9]*"/"version": "$(VERSION)"/' "$$TAURI_CONFIG"; \
 	fi; \
 	\
 	# Commit and tag \
