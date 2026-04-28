@@ -315,7 +315,7 @@ fn main() {
 
     // 创建检查点管理器
     let checkpoint_manager = match CheckpointManager::new(&checkpoint_path) {
-        Ok(manager) => manager,
+        Ok(manager) => Arc::new(manager),
         Err(e) => {
             tracing::error!("Failed to create checkpoint manager: {}", e);
             eprintln!("无法创建检查点管理器: {}\n路径: {}", e, checkpoint_path.display());
@@ -323,12 +323,17 @@ fn main() {
         }
     };
 
-    // 清理过期检查点
-    if let Ok(count) = checkpoint_manager.cleanup_expired() {
-        if count > 0 {
-            tracing::info!("Cleaned up {} expired checkpoints", count);
+    // 延迟清理过期检查点，避免启动时与 sled 后台线程冲突
+    let checkpoint_manager_for_cleanup = Arc::clone(&checkpoint_manager);
+    tokio::spawn(async move {
+        // 等待 10 秒后再清理，确保 sled 后台线程稳定运行
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        if let Ok(count) = checkpoint_manager_for_cleanup.cleanup_expired() {
+            if count > 0 {
+                tracing::info!("Cleaned up {} expired checkpoints", count);
+            }
         }
-    }
+    });
 
     tauri::Builder::default()
         .plugin(tauri_plugin_cli::init())
@@ -337,7 +342,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
         .manage(AppState {
-            checkpoint_manager: Arc::new(checkpoint_manager),
+            checkpoint_manager,
             download_manager: Arc::new(Mutex::new(None)),
         })
         .invoke_handler(tauri::generate_handler![
