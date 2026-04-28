@@ -10,77 +10,17 @@ const OBSUTIL_NAME: &str = "obsutil.exe";
 #[cfg(not(target_os = "windows"))]
 const OBSUTIL_NAME: &str = "obsutil";
 
-/// 获取 obsutil 路径（优先使用内嵌版本）
+/// 获取 obsutil 路径（优先使用用户安装版本）
 pub fn get_obsutil_path() -> Option<String> {
-    // 1. 优先检查内嵌版本（相对于可执行文件的路径）
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            // 检查 .app bundle 内的 Resources/bin (Tauri 打包后的嵌套路径 - macOS)
-            #[cfg(target_os = "macos")]
-            {
-                let embedded_path = exe_dir
-                    .parent()
-                    .map(|p| p.join(format!("Resources/Resources/bin/{}", OBSUTIL_NAME)))
-                    .filter(|p| p.exists());
+    // 1. 优先检查用户安装版本（应用数据目录）
+    if let Some(data_dir) = dirs::data_dir() {
+        let user_install_path = data_dir
+            .join("pico-export-desktop")
+            .join("bin")
+            .join(OBSUTIL_NAME);
 
-                if let Some(path) = embedded_path {
-                    return path.to_str().map(|s| s.to_string());
-                }
-
-                // 检查 .app bundle 内的 Resources/bin (直接路径 - macOS)
-                let embedded_path = exe_dir
-                    .parent()
-                    .map(|p| p.join(format!("Resources/bin/{}", OBSUTIL_NAME)))
-                    .filter(|p| p.exists());
-
-                if let Some(path) = embedded_path {
-                    return path.to_str().map(|s| s.to_string());
-                }
-
-                // 开发模式：从 target/debug 或 target/release 向上找到项目根目录
-                // 检查 src-tauri/Resources/bin/obsutil
-                let dev_path = exe_dir
-                    .parent() // target
-                    .and_then(|p| p.parent()) // project root
-                    .map(|p| p.join(format!("src-tauri/Resources/bin/{}", OBSUTIL_NAME)))
-                    .filter(|p| p.exists());
-
-                if let Some(path) = dev_path {
-                    return path.to_str().map(|s| s.to_string());
-                }
-            }
-
-            // Windows/Linux: 检查 Resources/bin 目录
-            #[cfg(not(target_os = "macos"))]
-            {
-                let resources_path = exe_dir.join(format!("Resources/bin/{}", OBSUTIL_NAME));
-                if resources_path.exists() {
-                    return resources_path.to_str().map(|s| s.to_string());
-                }
-
-                // 开发模式：检查 src-tauri/Resources/bin/
-                let dev_path = exe_dir
-                    .parent()
-                    .and_then(|p| p.parent())
-                    .map(|p| p.join(format!("src-tauri/Resources/bin/{}", OBSUTIL_NAME)))
-                    .filter(|p| p.exists());
-
-                if let Some(path) = dev_path {
-                    return path.to_str().map(|s| s.to_string());
-                }
-            }
-
-            // 检查同级 bin 目录
-            let bin_path = exe_dir.join(format!("bin/{}", OBSUTIL_NAME));
-            if bin_path.exists() {
-                return bin_path.to_str().map(|s| s.to_string());
-            }
-
-            // 检查直接同级目录
-            let direct_path = exe_dir.join(OBSUTIL_NAME);
-            if direct_path.exists() {
-                return direct_path.to_str().map(|s| s.to_string());
-            }
+        if user_install_path.exists() {
+            return user_install_path.to_str().map(|s| s.to_string());
         }
     }
 
@@ -117,42 +57,83 @@ pub fn get_obsutil_path() -> Option<String> {
     }
 
     // 3. 检查常见安装位置
-    #[cfg(target_os = "windows")]
-    let common_paths: Vec<&str> = vec![
-        r"C:\Program Files\obsutil\obsutil.exe",
-        r"C:\obsutil\obsutil.exe",
-    ];
-
     #[cfg(target_os = "macos")]
-    let common_paths: Vec<&str> = vec![
-        "/usr/local/bin/obsutil",
-        "/opt/obsutil/obsutil",
-        "/usr/bin/obsutil",
-    ];
+    {
+        // macOS: 常见位置
+        let common_paths = [
+            "/usr/local/bin/obsutil",
+            "/opt/homebrew/bin/obsutil",
+            "~/bin/obsutil",
+        ];
 
-    #[cfg(target_os = "linux")]
-    let common_paths: Vec<&str> = vec![
-        "/usr/local/bin/obsutil",
-        "/opt/obsutil/obsutil",
-        "/usr/bin/obsutil",
-        "/bin/obsutil",
-    ];
+        for path_str in common_paths {
+            let path = if path_str.starts_with('~') {
+                if let Some(home) = dirs::home_dir() {
+                    home.join(&path_str[2..])
+                } else {
+                    continue;
+                }
+            } else {
+                PathBuf::from(path_str)
+            };
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-    let common_paths: Vec<&str> = vec![];
+            if path.exists() {
+                return path.to_str().map(|s| s.to_string());
+            }
+        }
+    }
 
-    for path in &common_paths {
-        if Path::new(path).exists() {
-            return Some(path.to_string());
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: 常见位置
+        if let Some(home) = dirs::home_dir() {
+            let common_paths = [
+                home.join("bin").join("obsutil.exe"),
+                home.join("obsutil").join("obsutil.exe"),
+            ];
+
+            for path in common_paths {
+                if path.exists() {
+                    return path.to_str().map(|s| s.to_string());
+                }
+            }
         }
     }
 
     None
 }
 
-/// 检查 obsutil 是否可用
-pub fn check_obsutil() -> bool {
+/// 检查 obsutil 是否已安装
+pub fn check_obsutil_installed() -> bool {
     get_obsutil_path().is_some()
+}
+
+/// 获取 obsutil 安装目录
+pub fn get_install_dir() -> Option<PathBuf> {
+    dirs::data_dir().map(|d| d.join("pico-export-desktop").join("bin"))
+}
+
+/// 获取 obsutil 下载 URL（根据平台）
+pub fn get_obsutil_download_url() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        "https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_darwin_amd64.tar.gz".to_string()
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        "https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_windows_amd64.zip".to_string()
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        "https://obs-community-intl.obs.ap-southeast-1.myhuaweicloud.com/obsutil/current/obsutil_linux_amd64.tar.gz".to_string()
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        "".to_string()
+    }
 }
 
 /// 获取 obsutil 版本信息

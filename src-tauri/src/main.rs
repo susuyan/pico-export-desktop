@@ -242,6 +242,33 @@ async fn retry_failed(
     }
 }
 
+// 检查 obsutil 安装状态
+#[tauri::command]
+async fn check_obsutil_status() -> Result<IpcResponse<serde_json::Value>, String> {
+    use crate::obs_client::{check_obsutil_installed, get_install_dir, get_obsutil_download_url};
+
+    let installed = check_obsutil_installed();
+    let install_dir = get_install_dir()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "未知".to_string());
+    let download_url = get_obsutil_download_url();
+
+    Ok(IpcResponse::success(serde_json::json!({
+        "installed": installed,
+        "install_dir": install_dir,
+        "download_url": download_url,
+        "platform": if cfg!(target_os = "macos") {
+            "macOS"
+        } else if cfg!(target_os = "windows") {
+            "Windows"
+        } else if cfg!(target_os = "linux") {
+            "Linux"
+        } else {
+            "Unknown"
+        }
+    })))
+}
+
 // 打开目录
 #[tauri::command]
 async fn open_directory(path: String) -> Result<(), String> {
@@ -310,6 +337,7 @@ fn main() {
             cancel_download,
             open_directory,
             retry_failed,
+            check_obsutil_status,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
