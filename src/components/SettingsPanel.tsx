@@ -4,6 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useDownloadStore } from '@/stores/downloadStore'
+import type { IpcResponse } from '@/types'
 
 interface ObsutilStatus {
   installed: boolean
