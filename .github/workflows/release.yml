@@ -158,6 +158,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: release.id,
-              body: body
+              body: body,
+              draft: false  // Publish the release
             });
-            console.log('Release updated successfully');
+            console.log('Release published successfully');
